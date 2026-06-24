@@ -5,98 +5,101 @@
 
 """
 sna_to_ns_commands.py
-Cisco SNA / NetFlow CSV を入力に、Network Sketcher の CLI コマンド列と
-[FLOW] 貼り付け用 CSV を出力する。Windows / macOS / Ubuntu 対応。
+Takes a Cisco SNA / NetFlow CSV as input and outputs a Network Sketcher CLI
+command sequence plus a [FLOW] paste-ready CSV. Runs on Windows / macOS / Ubuntu.
 
-入力CSV形式 (自動判定):
-  - API形式  : searchSubject.* / peer.* など機械可読のカラム
-  - UI形式   : Subject IP Address 等 人間可読 (Total Bytes="56.49 M", Duration="36min 38s",
-               Peer Port/Protocol="2055/UDP")。必要列へ自動正規化して処理。
+Input CSV formats (auto-detected):
+  - API format : machine-readable columns such as searchSubject.* / peer.*
+  - UI format  : human-readable columns such as Subject IP Address (Total Bytes="56.49 M",
+                 Duration="36min 38s", Peer Port/Protocol="2055/UDP"). Auto-normalized to
+                 the required columns before processing.
 
-設計(NetFlow-only前提):
-  - Inside Hosts = RFC1918 + 自組織公開帯(INSIDE_PUBLIC)
-  - 観測IP -> /24 サブネット(=セグメント/VLAN)に集約 (flows>=THRESH)
-  - サブネットを /16 へまとめ、トラフィックグラフ(最近傍)で拠点へ集約 + spur分離
-  - sna_to_ns_config.json の site_cidrs で任意CIDR->拠点を明示指定可(自動集約より優先)
-  - server/client 役割は SNA orientation(peer=サーバ)で判定
-  - 拠点を「DC相当(サーバ系)」「クライアント主体」に分類
-  - レイアウト: (Internet-Svc) / Internet_wp_ / DC拠点(上段) / WAN_wp_ / client拠点(下段)
+Design (NetFlow-only assumption):
+  - Inside Hosts = RFC1918 + the organization's own public ranges (INSIDE_PUBLIC)
+  - Observed IPs are aggregated into /24 subnets (= segment/VLAN) (flows>=THRESH)
+  - Subnets are grouped into /16, then aggregated into sites via the traffic graph
+    (nearest neighbor), with spurs split off
+  - site_cidrs in sna_to_ns_config.json can explicitly map an arbitrary CIDR -> site
+    (takes precedence over automatic aggregation)
+  - server/client roles are decided by SNA orientation (peer = server)
+  - sites are classified into "DC-like (server-oriented)" and "client-oriented"
+  - Layout: (Internet-Svc) / Internet_wp_ / DC sites (top) / WAN_wp_ / client sites (bottom)
 
-出力 (各入力CSVごとに Output_data/<csv名>/ 配下):
-  - gen_master_commands.txt : Network Sketcher CLIコマンド列
-  - gen_flow_list.csv        : [FLOW] 貼り付け用CSV (Source/Dest=マスタ機器名, Max bandwidth Mbps)
-  - out_of_scope_ips.csv     : 採用されなかったサーバ候補IP(理由付き)
-  - _normalized_flow.csv     : UI形式入力時の正規化中間ファイル
+Output (per input CSV, under Output_data/<csv name>/):
+  - gen_master_commands.txt : Network Sketcher CLI command sequence
+  - gen_flow_list.csv        : [FLOW] paste-ready CSV (Source/Dest = master device name, Max bandwidth Mbps)
+  - out_of_scope_ips.csv     : server-candidate IPs that were not adopted (with reasons)
+  - _normalized_flow.csv     : intermediate normalized file for UI-format input
 
-エンドポイント登録(RULE 11.5準拠 = SVI無し/物理ポート直IP):
-  --endpoints {none,servers,clients,both}   (既定 both)
-      servers : 内部サーバIPを 1IP=1デバイス。インターネット宛は(proto,port)で1デバイスに集約
-      clients : 1セグメント=1 PCデバイス(IPなし)
-      both    : 両方
+Endpoint registration (RULE 11.5 compliant = no SVI / IP directly on the physical port):
+  --endpoints {none,servers,clients,both}   (default both)
+      servers : inside server IP as 1 IP = 1 device. Internet-bound traffic is aggregated into one device per (proto,port)
+      clients : 1 segment = 1 PC device (no IP)
+      both    : both
 
-使い方:
-  python sna_to_ns_commands.py                         # Input_data 内の全CSVを一括変換
-  python sna_to_ns_commands.py path/to/flow.csv        # 単一CSVを変換
-  python sna_to_ns_commands.py path/to/folder          # フォルダ内の全CSVを変換
+Usage:
+  python sna_to_ns_commands.py                         # convert all CSVs in Input_data at once
+  python sna_to_ns_commands.py path/to/flow.csv        # convert a single CSV
+  python sna_to_ns_commands.py path/to/folder          # convert all CSVs in a folder
   python sna_to_ns_commands.py --config my.json --endpoints both
 """
 import csv, collections, sys, json, os, argparse, ipaddress, math, re, subprocess
 sys.stdout.reconfigure(encoding="utf-8")
 
 # ================= CONFIG =================
-# 既定の設定フォルダ(スクリプトと同じ)。--config で上書き可。
+# Default config folder (same as the script). Can be overridden with --config.
 BASEDIR = os.path.dirname(os.path.abspath(__file__))
 THRESH = 100
-# --- 手動オーバーライドの既定値 (空=自動判定に委ねる)。ns_config.json で上書き、競合時は手動優先 ---
-INSIDE_PUBLIC = ()                      # 自組織の公開帯 (Inside扱い)。空なら自動推定
-K_CAMPUS = 2                            # クライアント拠点シード数(主要ハブ)
-DC_FORCE_REGIONS = set()               # DC相当として強制する/16 (手動追加)
-SPUR_REGIONS = set()                   # 独立拠点(スパー)にする/16 (手動追加)
-MERGE_ALL_DC = True                     # DC系/16をひとつのDC拠点にまとめる
-NAME_MAP = {}                          # シード/16 -> 拠点名 (手動ラベル, 自動名を上書き)
+# --- Defaults for manual overrides (empty = leave to auto-detection). Overridden by ns_config.json; manual wins on conflict ---
+INSIDE_PUBLIC = ()                      # organization's own public ranges (treated as Inside). Empty = auto-estimate
+K_CAMPUS = 2                            # number of client-site seeds (primary hubs)
+DC_FORCE_REGIONS = set()               # /16 forced to be DC-like (manually added)
+SPUR_REGIONS = set()                   # /16 forced to be an independent site (spur) (manually added)
+MERGE_ALL_DC = True                     # merge DC-like /16s into a single DC site
+NAME_MAP = {}                          # seed /16 -> site name (manual label, overrides auto name)
 DC_SITE_NAME = "Datacenter"
-SPUR_NAME = {}                          # spur /16 -> 拠点名 (手動。無ければ Site-<region> 自動)
-CODE_MAP = {"Datacenter":"DC"}        # 拠点名 -> 短縮コード (手動。無ければ自動短縮)
-EP_ROW_WIDTH = 8                        # device_location 下段の1行あたりエンドポイント数
-CHUNK = 40                              # 巨大bulkコマンドの分割サイズ(MCP投入用)
-# --- 自動判定の既定パラメータ (ns_config.json で上書き可) ---
-AUTO_INSIDE = True                      # 公開帯Inside自動推定 ON/OFF
-AUTO_DC = True                          # DC拠点自動判定 ON/OFF
-AUTO_SPUR = True                        # スパー拠点自動判定 ON/OFF
-SPUR_LINK_RATIO = 0.05                  # spur判定: シードとの最大結合 < ratio*内部flows なら孤立
+SPUR_NAME = {}                          # spur /16 -> site name (manual; if absent, Site-<region> automatically)
+CODE_MAP = {"Datacenter":"DC"}        # site name -> short code (manual; if absent, auto-shortened)
+EP_ROW_WIDTH = 8                        # number of endpoints per row in the bottom of device_location
+CHUNK = 40                              # split size for huge bulk commands (for MCP submission)
+# --- Defaults for auto-detection parameters (overridable via ns_config.json) ---
+AUTO_INSIDE = True                      # auto-estimate public Inside ranges ON/OFF
+AUTO_DC = True                          # auto-detect DC sites ON/OFF
+AUTO_SPUR = True                        # auto-detect spur sites ON/OFF
+SPUR_LINK_RATIO = 0.05                  # spur test: isolated if max coupling with a seed < ratio*internal flows
 # ==========================================
 
 ap = argparse.ArgumentParser(
     description="Cisco SNA/NetFlow CSV -> Network Sketcher commands + [FLOW] CSV")
 ap.add_argument("input", nargs="?", default=None,
-                help="入力CSV(単一ファイル)またはフォルダ。省略時は --input-dir 内の全CSVを処理")
+                help="input CSV (single file) or folder. If omitted, all CSVs in --input-dir are processed")
 ap.add_argument("--input-dir", default="Input_data",
-                help="一括処理する入力フォルダ (既定: Input_data)")
+                help="input folder for batch processing (default: Input_data)")
 ap.add_argument("--output-dir", default="Output_data",
-                help="出力ルート (既定: Output_data)。各CSVは <output-dir>/<csv名>/ に出力")
+                help="output root (default: Output_data). Each CSV is written to <output-dir>/<csv name>/")
 ap.add_argument("--endpoints", choices=["none","servers","clients","both"], default="both")
 ap.add_argument("--server-min-flows", type=int, default=1)
 ap.add_argument("--no-flow", action="store_true",
-                help="[FLOW] 貼り付け用 CSV (gen_flow_list.csv) を生成しない")
+                help="do not generate the [FLOW] paste-ready CSV (gen_flow_list.csv)")
 ap.add_argument("--config", default=None,
-                help="設定JSONのパス (既定: スクリプトと同じフォルダの sna_to_ns_config.json)")
+                help="path to the config JSON (default: sna_to_ns_config.json in the same folder as the script)")
 ap.add_argument("--outdir", default=None,
-                help="(内部用) 単一CSVの出力フォルダを明示指定")
+                help="(internal) explicitly set the output folder for a single CSV")
 args = ap.parse_args()
 
-# ---- バッチドライバ: フォルダ/既定(Input_data)指定時は各CSVを個別プロセスで処理 ----
+# ---- batch driver: when a folder / the default (Input_data) is given, process each CSV in its own process ----
 def _is_csv(p): return p.lower().endswith(".csv")
 single_file = args.input if (args.input and os.path.isfile(args.input)) else None
 if single_file is None:
     folder = args.input if (args.input and os.path.isdir(args.input)) else args.input_dir
     if not os.path.isdir(folder):
-        print("[ERROR] 入力フォルダが見つかりません: %s"%os.path.abspath(folder))
-        print("        CSVを置くか、単一CSVのパスを指定してください。"); sys.exit(1)
+        print("[ERROR] input folder not found: %s"%os.path.abspath(folder))
+        print("        Place CSVs there, or specify the path to a single CSV."); sys.exit(1)
     csvs=sorted(os.path.join(folder,f) for f in os.listdir(folder)
                 if _is_csv(f) and not f.startswith("_normalized_")
                 and os.path.isfile(os.path.join(folder,f)))
     if not csvs:
-        print("[ERROR] CSVが見つかりません: %s"%os.path.abspath(folder)); sys.exit(1)
+        print("[ERROR] no CSV found: %s"%os.path.abspath(folder)); sys.exit(1)
     print("[BATCH] %d CSV file(s) in %s"%(len(csvs),os.path.abspath(folder)))
     rc=0
     for cp in csvs:
@@ -112,7 +115,7 @@ if single_file is None:
         r=subprocess.run(cmd); rc=rc or r.returncode
     print("\n[BATCH] done (%d file(s))."%len(csvs)); sys.exit(rc)
 
-# ---- 単一CSV処理 (leaf) ----
+# ---- single-CSV processing (leaf) ----
 CSV = single_file
 DO_SRV = args.endpoints in ("servers","both")
 DO_CLI = args.endpoints in ("clients","both")
@@ -122,10 +125,10 @@ OUTDIR = os.path.abspath(args.outdir) if args.outdir else os.path.abspath(os.pat
 os.makedirs(OUTDIR, exist_ok=True)
 OUTFILE = os.path.join(OUTDIR, "gen_master_commands.txt")
 
-# ---- 入力CSVの形式自動判定 + 正規化 ----
-# 対応: (1) API形式(searchSubject.*/peer.* 機械名) はそのまま
-#       (2) UI形式(Subject IP Address 等 人間可読、Total Bytes="56.49 M"、Duration="36min 38s"、
-#           Peer Port/Protocol="2055/UDP") を API形式の必要列へ変換
+# ---- auto-detect the input CSV format + normalize ----
+# Supports: (1) API format (searchSubject.*/peer.* machine names): used as-is
+#           (2) UI format (human-readable such as Subject IP Address, Total Bytes="56.49 M", Duration="36min 38s",
+#               Peer Port/Protocol="2055/UDP"): converted to the required columns of the API format
 def _parse_bytes(s):
     s=(s or "").strip()
     if not s or s=="--": return 0.0
@@ -155,8 +158,8 @@ def _parse_port(s):
 def normalize_csv(path):
     with open(path,newline="",encoding="utf-8",errors="replace") as fh:
         head=next(csv.reader(fh))
-    if "searchSubject.ipAddress" in head: return path        # API形式: そのまま
-    if "Subject IP Address" not in head:  return path        # 未知形式: 後段に委ねる
+    if "searchSubject.ipAddress" in head: return path        # API format: use as-is
+    if "Subject IP Address" not in head:  return path        # unknown format: leave to later stages
     ix={c:i for i,c in enumerate(head)}
     def g(v,c):
         j=ix.get(c); return v[j] if (j is not None and j<len(v)) else ""
@@ -181,8 +184,8 @@ def normalize_csv(path):
 CSV = normalize_csv(CSV)
 
 # ---- JSON config (optional overrides; falls back to code defaults) ----
-# sna_to_ns_config.json は各キーが {"value": ..., "description": ...} 構造。
-# cfg() は value を取り出す(旧来のフラット値や _description 等のメタキーも許容)。
+# sna_to_ns_config.json has each key as a {"value": ..., "description": ...} structure.
+# cfg() extracts value (also tolerates legacy flat values and meta keys such as _description).
 cfgpath = os.path.abspath(args.config) if args.config else os.path.join(BASEDIR, "sna_to_ns_config.json")
 CFG = {}
 if os.path.exists(cfgpath):
@@ -197,22 +200,22 @@ SRV_MIN_BYTES = int(cfg("server_min_bytes", 5000))
 REQ_SYNACK    = bool(cfg("require_tcp_synack", True))
 INC_UDP       = bool(cfg("include_udp", True))
 THRESH        = int(cfg("subnet_min_flows", THRESH))
-# 手動オーバーライド(自動判定に追加され、競合時は手動が優先)
+# manual overrides (added to auto-detection; manual wins on conflict)
 MAN_INSIDE = tuple(cfg("inside_public", list(INSIDE_PUBLIC)))
 MAN_DC     = set(cfg("dc_force_regions", DC_FORCE_REGIONS))
 MAN_SPUR   = set(cfg("spur_regions", SPUR_REGIONS))
 NAME_MAP   = dict(cfg("name_map", NAME_MAP))
-# 自動判定ノブ
+# auto-detection knobs
 AUTO_INSIDE     = bool(cfg("auto_inside_public", AUTO_INSIDE))
 AUTO_DC         = bool(cfg("auto_dc_regions", AUTO_DC))
 AUTO_SPUR       = bool(cfg("auto_spur_regions", AUTO_SPUR))
 SPUR_LINK_RATIO = float(cfg("spur_link_ratio", SPUR_LINK_RATIO))
 
-# ---- CIDR-based site definition (任意CIDRで拠点を明示。region自動集約より優先) ----
-#   site_cidrs   : {"CIDR": "拠点名"}  例 {"10.10.0.0/16":"Tokyo","10.20.30.0/24":"SrvFarm"}
-#   site_cidr_dc : 上記のうちDC(サーバ系/上段)として扱う拠点名のリスト
-# 集約の最小単位は /24。/24より広いCIDRは内包する全/24を、/24より細かいCIDRは
-# 重なる/24全体を、その拠点に割り当てる(最長プレフィックス一致が優先)。
+# ---- CIDR-based site definition (explicitly assign sites by arbitrary CIDR; takes precedence over region auto-aggregation) ----
+#   site_cidrs   : {"CIDR": "site name"}  e.g. {"10.10.0.0/16":"Tokyo","10.20.30.0/24":"SrvFarm"}
+#   site_cidr_dc : list of the above site names to treat as DC (server-oriented / top row)
+# The minimum aggregation unit is /24. A CIDR wider than /24 assigns all contained /24s; a CIDR finer
+# than /24 assigns every overlapping /24, to that site (longest-prefix match wins).
 SITE_CIDRS      = dict(cfg("site_cidrs", {}))
 SITE_CIDR_DC    = set(cfg("site_cidr_dc", []))
 CIDR_SITE_NAMES = set(SITE_CIDRS.values())
@@ -220,7 +223,7 @@ _site_nets=[]
 for _cidr,_nm in SITE_CIDRS.items():
     try: _site_nets.append((ipaddress.ip_network(_cidr,strict=False),_nm))
     except ValueError: print("[WARN] invalid CIDR in site_cidrs: %r"%_cidr)
-_site_nets.sort(key=lambda x:-x[0].prefixlen)   # 最長プレフィックス優先
+_site_nets.sort(key=lambda x:-x[0].prefixlen)   # longest prefix first
 def cidr_site_ip(ip):
     try: a=ipaddress.ip_address(ip)
     except ValueError: return None
@@ -228,7 +231,7 @@ def cidr_site_ip(ip):
         if a in net: return nm
     return None
 def cidr_site_sub(k24str):
-    # /24キー("a.b.c") に重なる最長一致CIDRの拠点名 (無ければ None)
+    # site name of the longest-matching CIDR overlapping the /24 key ("a.b.c") (None if absent)
     if not k24str: return None
     try: s24=ipaddress.ip_network(k24str+".0/24",strict=False)
     except ValueError: return None
@@ -248,10 +251,10 @@ def _oct(ip,i):
     try: return int(ip.split(".")[i])
     except: return -1
 def is_special(ip):
-    # 自組織公開帯になり得ない予約/特殊用途レンジ (RFC5735/6598/multicast等)
+    # reserved / special-use ranges that cannot be an organization's public range (RFC5735/6598/multicast, etc.)
     a=_oct(ip,0); b=_oct(ip,1)
     if a in (0,127): return True
-    if a>=224: return True                               # multicast/予約 224-255
+    if a>=224: return True                               # multicast/reserved 224-255
     if ip.startswith("169.254."): return True            # link-local
     if a==100 and 64<=b<=127: return True                # CGNAT 100.64/10
     if a==198 and b in (18,19): return True              # benchmark 198.18/15
@@ -267,12 +270,12 @@ def last_oct(ip):
     try: return int(ip.split(".")[3])
     except: return -1
 
-# ---------- AUTO: 自組織公開帯(inside_public)の推定 (本処理前のプリスキャン) ----------
-# 自組織の公開/16は「発信(outinit)が支配的」= 社内ユーザ/プロキシが外部へ大量に発信する。
-#   outinit = searchSubject(=発信側) が公開ピア宛に出したフロー数。
-#   インターネット上のサーバは subject に現れない(outinit≈0)。
-# 判定: special-use帯を除外し、outinit >= 絶対閾値 かつ outinit/総数 >= 比率 の/16のみ採用。
-# (散在する外部クライアントや人気サービスは比率/絶対値で除外される)
+# ---------- AUTO: estimate the organization's public ranges (inside_public) (pre-scan before main processing) ----------
+# An organization's public /16 is "dominated by outbound initiation (outinit)" = internal users/proxies send a lot outward.
+#   outinit = number of flows that searchSubject (= the initiating side) sent to a public peer.
+#   Servers on the Internet do not appear as the subject (outinit ~ 0).
+# Decision: excluding special-use ranges, adopt only /16s with outinit >= absolute threshold AND outinit/total >= ratio.
+# (scattered external clients and popular services are excluded by the ratio/absolute value)
 INSIDE_OUTINIT_MIN   = int(cfg("inside_outinit_min", 2000))
 INSIDE_OUTINIT_RATIO = float(cfg("inside_outinit_ratio", 0.6))
 auto_inside=set()
@@ -288,16 +291,16 @@ if AUTO_INSIDE:
             rs=is_rfc1918(sip); rp=is_rfc1918(pip)
             if not rs and not is_special(sip):
                 rg=reg16(sip); pub_tot[rg]+=1
-                if not rp: pub_oi[rg]+=1            # 公開subject -> 公開peer = 社内発信
+                if not rp: pub_oi[rg]+=1            # public subject -> public peer = internal outbound
             if not rp and not is_special(pip):
                 pub_tot[reg16(pip)]+=1
     for rg,oi in pub_oi.items():
         if oi>=INSIDE_OUTINIT_MIN and oi>=INSIDE_OUTINIT_RATIO*pub_tot[rg]:
             auto_inside.add(rg+".")
-# 手動を統合(競合は手動優先=和集合に手動を必ず含める)
+# merge manual (manual wins on conflict = always include manual in the union)
 INSIDE_PUBLIC = tuple(sorted(set(auto_inside) | set(MAN_INSIDE)))
 
-# 外部(インターネット)サービスの実サービスポート判定(従来どおり: 内部サーバ検出には未使用)
+# real service-port test for external (Internet) services (as before: not used for inside-server detection)
 KNOWN_HIGH={1433,1521,3306,3389,5432,5060,5061,8080,8443,8000,5989,5985,5986,
             1645,1812,1813,9100,52311,7778,10000,3268,3269,2049}
 def is_service(p): return p>0 and (p<1024 or p in KNOWN_HIGH)
@@ -315,15 +318,15 @@ srv_ip_clients=collections.defaultdict(set)               # inside server IP -> 
 svc_bytes=collections.Counter()      # (proto,port) external service -> bytes
 svc_flows=collections.Counter()      # (proto,port) external service -> flows
 svc_ips=collections.defaultdict(set) # (proto,port) external service -> {server IP,...}
-seg_cli_hosts=collections.defaultdict(set)   # /24セグメント -> {クライアント(発信)側ホストIP,...}
+seg_cli_hosts=collections.defaultdict(set)   # /24 segment -> {client (initiator) side host IP,...}
 
 with open(CSV,newline="",encoding="utf-8",errors="replace") as fh:
     r=csv.reader(fh); cols=next(r); ix={c:i for i,c in enumerate(cols)}
-    # orientation 固定: searchSubject = client, peer = server
+    # orientation fixed: searchSubject = client, peer = server
     Sip=ix["searchSubject.ipAddress"];Pip=ix["peer.ipAddress"]
-    Pp=ix["peer.portProtocol.port"]                      # サーバ(=サービス)ポート
-    PrS=ix["searchSubject.portProtocol.protocol"]        # フローのL4プロトコル
-    pSA=ix["peer.synAckPackets"]                          # サーバが接続を受理した証拠
+    Pp=ix["peer.portProtocol.port"]                      # server (= service) port
+    PrS=ix["searchSubject.portProtocol.protocol"]        # L4 protocol of the flow
+    pSA=ix["peer.synAckPackets"]                          # evidence that the server accepted the connection
     By=ix["connection.transferBytes"]
     maxix=max(Sip,Pip,Pp,PrS,pSA,By)
     for v in r:
@@ -349,23 +352,23 @@ with open(CSV,newline="",encoding="utf-8",errors="replace") as fh:
         elif proto=="UDP":
             ok = INC_UDP
         else:
-            ok = False                                   # ICMP 等はサービス対象外
+            ok = False                                   # ICMP etc. are out of scope for services
         # endpoint detection (server = peer side)
         if ok and sport>0:
-            if inb:                                      # 内部サーバ
+            if inb:                                      # inside server
                 ports_bytes[pip][sport]+=by
                 ports_flows[pip][sport]+=1
                 srv_ip_clients[pip].add(sip)
-            elif ina and is_service(sport):              # 外部(インターネット)サービス(実サービスポートのみ)
+            elif ina and is_service(sport):              # external (Internet) service (real service ports only)
                 svc_bytes[(proto,sport)]+=by
                 svc_flows[(proto,sport)]+=1
-                svc_ips[(proto,sport)].add(pip)          # 該当サービスの外部サーバIPを記録
+                svc_ips[(proto,sport)].add(pip)          # record the external server IP of this service
         # /24 aggregation + role (sip=client, pip=server)
         if ina:
             kk=k24(sip); e=sub.get(kk)
             if e is None: e=Sub(reg16(sip)); sub[kk]=e
             e.flows+=1; e.bytes+=by; e.cli+=1
-            seg_cli_hosts[kk].add(sip)           # セグメント別 クライアント(発信)ホスト数の母集合
+            seg_cli_hosts[kk].add(sip)           # population of client (initiator) hosts per segment
             try: e.octs.add(int(sip.split(".")[3]))
             except: pass
         if inb:
@@ -392,21 +395,21 @@ for reg,ks in reg_members.items():
         if is_userlan(e): reg_user[reg]+=1
 
 regions=set(reg_members)
-# --- AUTO: DC拠点判定 (サーバ系セグメント数 > ユーザ系セグメント数) + 手動強制 ---
+# --- AUTO: DC-site detection (number of server segments > number of user segments) + manual force ---
 def reg_is_dc_auto(reg):
     ks=reg_members[reg]
     n_srv_seg=sum(1 for k in ks if adopted[k].srv>adopted[k].cli)
-    n_user_seg=len(ks)-n_srv_seg  # cli >= srv のセグメント数
-    return n_srv_seg>n_user_seg   # 同数の場合は DC としない
+    n_user_seg=len(ks)-n_srv_seg  # number of segments where cli >= srv
+    return n_srv_seg>n_user_seg   # do not treat as DC when equal
 auto_dc=set(r for r in regions if AUTO_DC and reg_is_dc_auto(r))
-dc_regs=auto_dc | set(r for r in regions if r in MAN_DC)   # 手動優先(必ず含む)
+dc_regs=auto_dc | set(r for r in regions if r in MAN_DC)   # manual wins (always included)
 non_dc=[r for r in regions if r not in dc_regs]
 
-# シード(主要ハブ) = DC以外で内部flows最大の上位K
+# seeds (primary hubs) = top K by internal flows, excluding DC
 seeds=sorted(non_dc,key=lambda r:-regflows.get(r,0))[:K_CAMPUS]
 def best_link(reg):
     return max((mat.get(tuple(sorted((reg,s))),0) for s in seeds if s!=reg), default=0)
-# --- AUTO: スパー(孤立)拠点判定: どのシードとも結合が弱い + 手動強制 ---
+# --- AUTO: spur (isolated) site detection: weakly coupled to every seed + manual force ---
 auto_spur=set()
 if AUTO_SPUR:
     for r in non_dc:
@@ -433,32 +436,32 @@ for reg in dc_regs:
 for reg in spur_regs:
     region_site[reg]=SPUR_NAME.get(reg,"Site-%s"%reg.replace(".","-"))
 
-# サブネット(/24) -> 拠点。CIDR明示(site_cidrs)があれば region 自動集約より優先。
+# subnet (/24) -> site. If an explicit CIDR (site_cidrs) exists, it takes precedence over region auto-aggregation.
 site_subnets=collections.defaultdict(list)
 site_of_sub={}
 for k,e in adopted.items():
     s=cidr_site_sub(k)
     if s is None: s=region_site[e.reg]
     site_of_sub[k]=s; site_subnets[s].append((k,e))
-# 拠点 -> 所属/16 (サマリ表示用に site_subnets から再構築)
+# site -> member /16 (rebuilt from site_subnets for summary display)
 site_regs=collections.defaultdict(list)
 for s,subs in site_subnets.items():
     site_regs[s]=sorted(set(e.reg for k,e in subs))
 
 def site_is_dc(site):
-    if site in SITE_CIDR_DC: return True               # CIDR拠点のDC明示指定
+    if site in SITE_CIDR_DC: return True               # explicit DC designation for a CIDR site
     subs=site_subnets[site]
     regs=set(e.reg for k,e in subs)
     if regs and regs<=dc_regs and site not in CIDR_SITE_NAMES: return True
     n_srv_seg=sum(1 for k,e in subs if e.srv>e.cli)
     n_user_seg=sum(1 for k,e in subs if e.cli>=e.srv)
-    return n_srv_seg>n_user_seg    # 同数の場合は DC としない
+    return n_srv_seg>n_user_seg    # do not treat as DC when equal
 dc_sites=sorted([s for s in site_subnets if site_is_dc(s)])
 client_sites=[s for s in site_subnets if not site_is_dc(s)]
 def site_flow(s): return sum(e.flows for k,e in site_subnets[s])
 client_sites=sorted(client_sites,key=lambda s:-site_flow(s))
 
-# Fallback 1: DCなし → サーバ系フロー数が最大の拠点をDCとする
+# Fallback 1: no DC -> make the site with the most server-side flows the DC
 if not dc_sites and client_sites:
     def _site_srv_flows(s):
         return sum(e.srv for k,e in site_subnets[s])
@@ -467,7 +470,7 @@ if not dc_sites and client_sites:
         dc_sites=[_best]
         client_sites=[s for s in client_sites if s!=_best]
 
-# Fallback 2: サーバが全くない → クライアントIP数が最大の拠点をDCとする
+# Fallback 2: no servers at all -> make the site with the most client IPs the DC
 if not dc_sites and client_sites:
     def _site_cli_ips(s):
         return sum(len(seg_cli_hosts.get(k,())) for k,e in site_subnets[s])
@@ -478,7 +481,7 @@ if not dc_sites and client_sites:
 client_set=set(client_sites)
 site_order=dc_sites+client_sites
 
-# 拠点ごとに一意な短縮コード(インフラ機器名用)。自動命名で衝突しないようサフィックス付与。
+# unique short code per site (for infra device names). A suffix is added to avoid collisions in auto-naming.
 def _basecode(site):
     c=CODE_MAP.get(site)
     if c: return c
@@ -516,11 +519,11 @@ def site_access(site):
     return (c+"-Acc1") if site in client_set else (c+"-Core")
 
 servers=[]   # (name, ip, vlanname, site)
-srv_meta={}  # ip -> (max_port_bytes, total_bytes, top_port, distinct_clients)  (out-of-scope記録用)
+srv_meta={}  # ip -> (max_port_bytes, total_bytes, top_port, distinct_clients)  (for out-of-scope records)
 oos=[]       # out-of-scope: (ip, region, reason, max_port_bytes, total_bytes, top_port, distinct_clients)
-n_cand=0     # orientation 基準のサーバ候補IP数
+n_cand=0     # number of server-candidate IPs by orientation
 if DO_SRV:
-    per=collections.Counter()   # (site, port-label) -> 連番
+    per=collections.Counter()   # (site, port-label) -> sequence number
     cand=sorted(ports_bytes.keys(),
                 key=lambda ip:(-sum(ports_bytes[ip].values()), ip))
     for ip in cand:
@@ -529,7 +532,7 @@ if DO_SRV:
         tot=int(sum(pb.values())); mx=int(max(pb.values()) if pb else 0)
         topp=max(pb.items(),key=lambda x:x[1])[0] if pb else -1
         ncl=len(srv_ip_clients.get(ip,()))
-        # bytes 閾値を超えた実サービスポートのみ採用 (+ 任意のフロー下限 MINF)
+        # adopt only real service ports above the bytes threshold (+ optional flow floor MINF)
         qports=sorted(p for p,b in pb.items()
                       if b>=SRV_MIN_BYTES and ports_flows[ip][p]>=MINF)
         if not qports:
@@ -545,10 +548,10 @@ if DO_SRV:
         srv_meta[ip]=(mx,tot,topp,ncl)
 
 # ---------- segment classification (server-segment vs client-segment) ----------
-# 同一/24セグメント内にサーバとクライアントが混在する場合は「台数の多い方」へ帰属させる。
-#   server-segment : 採用サーバ台数 > クライアント専用ホスト台数
-#   client-segment : それ以外(クライアント>=サーバ、またはサーバ0)
-# server-segment はサーバ群を生成し(後段で FW 配下に分離)、client-segment は PC を1台生成する。
+# When servers and clients are mixed in the same /24 segment, assign it to "whichever has more hosts".
+#   server-segment : adopted server count > client-only host count
+#   client-segment : otherwise (client >= server, or zero servers)
+# server-segment generates the server group (separated under a FW later); client-segment generates one PC.
 seg_srv_hosts=collections.defaultdict(set)
 for nm,ip,vn,st in servers: seg_srv_hosts[k24(ip)].add(ip)
 def _seg_is_server(seg):
@@ -556,7 +559,7 @@ def _seg_is_server(seg):
     nc=len(seg_cli_hosts.get(seg,set())-seg_srv_hosts.get(seg,set()))
     return ns>0 and ns>nc
 server_seg=set(k for k in adopted if _seg_is_server(k))
-# client-majority セグメントに居たサーバ候補は out-of-scope(分離対象外)へ移す
+# move server candidates that were in a client-majority segment to out-of-scope (not separated)
 kept=[]
 for nm,ip,vn,st in servers:
     if k24(ip) in server_seg: kept.append((nm,ip,vn,st))
@@ -566,22 +569,22 @@ for nm,ip,vn,st in servers:
 servers=kept
 
 pcs=[]       # (name, vlanname, site)
-pc_name_by_seg={}   # /24セグメント -> PCデバイス名 (フローCSVのIP->名称解決用)
+pc_name_by_seg={}   # /24 segment -> PC device name (for resolving IP -> name in the flow CSV)
 if DO_CLI:
     per=collections.Counter()
     for s in site_order:
         for k,e,vl in site_svis[s]:
-            if k in server_seg: continue          # server-segment は PC を作らない
-            if e.cli<=0: continue                 # クライアント実績の無いセグメントは除外
+            if k in server_seg: continue          # do not create a PC for a server-segment
+            if e.cli<=0: continue                 # exclude segments with no client activity
             per[s]+=1
             n_cli_ips=len(seg_cli_hosts.get(k,()))
             nm="PC_%s_%d_%d"%(acode[s],n_cli_ips,per[s])
             pcs.append((nm, "Vlan%d"%vl, s)); pc_name_by_seg[k]=nm
 
 svcs=[]      # (name, proto, port, flows)
-svc_oos=0    # 閾値未満で除外した外部サービス数
-# Internet WayPoint 共有セグメント用に次のVLAN番号を予約
-inet_vlan=vlan; vlan+=1   # vlan は全内部サブネット割当後の次空き番号
+svc_oos=0    # number of external services excluded below the threshold
+# reserve the next VLAN number for the Internet WayPoint shared segment
+inet_vlan=vlan; vlan+=1   # vlan is the next free number after all internal subnets are assigned
 INET_VLAN_NAME="VlanIntSvc"
 if DO_SRV:
     for (proto,port),b in sorted(svc_bytes.items(),key=lambda x:-x[1]):
@@ -595,7 +598,7 @@ if DO_SRV:
 srv_sites=set(st for nm,ip,vn,st in servers)
 pc_sites =set(st for nm,vn,st in pcs)
 def site_mixed(s):
-    # 同一エリアにサーバセグメントとクライアントセグメントが共存する client 拠点
+    # a client site where a server segment and a client segment coexist in the same area
     return (s in srv_sites) and (s in pc_sites) and (s in client_set)
 def srv_access(site):
     return (code(site)+"-SrvSw") if site_mixed(site) else site_access(site)
@@ -603,25 +606,25 @@ def cli_access(site):
     return site_access(site)
 
 def mixed_client_grid(site):
-    # mixed client 拠点の device_location。境界FW配下に SrvSw を新設しサーバを分離配置:
-    #   左列(col0)縦 : Edge - FW - Core - Acc1 - (PCを下方向へ EP_ROW_WIDTH 折り返し)
-    #   右側列        : SrvSw(Core と同じ行) - (サーバを下方向へ1列で縦積み)
-    # PC帯(左)とサーバ帯(右)は空き列で分離し、L1リンクの交差を避ける。
+    # device_location for a mixed client site. A new SrvSw is placed under the boundary FW to separate servers:
+    #   left column (col0) vertical : Edge - FW - Core - Acc1 - (PCs wrap downward by EP_ROW_WIDTH)
+    #   right-side column           : SrvSw (same row as Core) - (servers stacked vertically in one column)
+    # The PC band (left) and the server band (right) are separated by an empty column to avoid L1 link crossings.
     c=code(site)
     pcs_s=[nm for nm,vn,st in pcs if st==site]
     srv_s=[nm for nm,ip,vn,st in servers if st==site]
     Wpc=max(1,min(len(pcs_s),EP_ROW_WIDTH))
     Wsrv=max(1,min(len(srv_s),EP_ROW_WIDTH))
-    col_srv=Wpc+1                          # サーバ帯の開始列(PC帯との間に空き列を1つ挟む)
+    col_srv=Wpc+1                          # start column of the server band (one empty column between it and the PC band)
     g={}
     g[(0,0)]="%s-Edge"%c
     g[(1,0)]="%s-FW"%c
     g[(2,0)]="%s-Core"%c
     g[(2,col_srv)]="%s-SrvSw"%c
     g[(3,0)]="%s-Acc1"%c
-    for i,nm in enumerate(pcs_s):          # PC: Acc1 直下(r4-)に左詰めで折り返し
+    for i,nm in enumerate(pcs_s):          # PC: wrap left-aligned directly under Acc1 (r4-)
         g[(4+i//Wpc, i%Wpc)]=nm
-    for i,nm in enumerate(srv_s):          # サーバ: SrvSw 直下(r3-)にサーバ帯内で折り返し
+    for i,nm in enumerate(srv_s):          # server: wrap within the server band directly under SrvSw (r3-)
         g[(3+i//Wsrv, col_srv+(i%Wsrv))]=nm
     maxr=max(r for r,_ in g); maxc=max(cc for _,cc in g)
     return [[g.get((r,cc),"_AIR_") for cc in range(maxc+1)] for r in range(maxr+1)]
@@ -649,8 +652,8 @@ for s in client_sites:
     else:
         c=code(s); rows=[["%s-Edge"%c],["%s-FW"%c],["%s-Core"%c],["%s-Acc1"%c]]+wrap(eps_of(s),EP_ROW_WIDTH)
         cmds.append('add device_location "%s"'%dq([s,rows]))
-# Internet-Svc: Internet(waypoint)はエリアの直下にあるため、全サーバを単一の最下段行に
-# 並べて下方向へ接続させる(複数行だと上段サーバの線が下段を跨いで交差するのを防ぐ)。
+# Internet-Svc: the Internet (waypoint) sits directly under the area, so place all servers in a single
+# bottom row and connect them downward (multiple rows would make upper servers' lines cross the lower ones).
 if DO_SRV and svcs:
     cmds.append('add device_location "%s"'%dq(["Internet-Svc",[[nm for nm,_,_,_ in svcs]]]))
 
@@ -667,10 +670,10 @@ for s in client_sites:
     links.append(["%s-FW"%c,"%s-Core"%c,"GigabitEthernet 0/2","GigabitEthernet 0/2"])
     links.append(["%s-Core"%c,"%s-Acc1"%c,"GigabitEthernet 0/1","GigabitEthernet 0/1"])
     links.append(["%s-Edge"%c,"WAN","GigabitEthernet 0/2","port %d"%wan_p]); wan_p+=1
-    if site_mixed(s):                      # サーバ用SW を境界FW配下に接続(サーバ⇔PC間はFW経由)
+    if site_mixed(s):                      # connect the server SW under the boundary FW (server<->PC goes through the FW)
         links.append(["%s-FW"%c,"%s-SrvSw"%c,"GigabitEthernet 0/3","GigabitEthernet 0/1"])
 # endpoints: connect to access switch; remember switch-port for L2 access binding
-#   サーバ -> srv_access (mixed拠点は SrvSw、それ以外は従来のアクセス) / PC -> cli_access
+#   server -> srv_access (SrvSw for mixed sites, otherwise the usual access) / PC -> cli_access
 sw_n=collections.Counter(); ep_access=[]   # (sw, swport, vlanname)
 for nm,ip,vn,st in servers:
     sw=srv_access(st); sw_n[sw]+=1; swp="GigabitEthernet 1/0/%d"%sw_n[sw]
@@ -678,7 +681,7 @@ for nm,ip,vn,st in servers:
 for nm,vn,st in pcs:
     sw=cli_access(st); sw_n[sw]+=1; swp="GigabitEthernet 1/0/%d"%sw_n[sw]
     links.append([nm,sw,"GigabitEthernet 0/0",swp]); ep_access.append((sw,swp,vn))
-inet_p_svc_start=inet_p   # Svc デバイスが使用する Internet 側ポートの開始番号を記録
+inet_p_svc_start=inet_p   # record the starting port number on the Internet side used by Svc devices
 for nm,proto,port,fl in svcs:
     links.append([nm,"Internet","GigabitEthernet 0/0","port %d"%inet_p]); inet_p+=1
 for batch in wrap(links,CHUNK):
@@ -759,7 +762,7 @@ for s in dc_sites:
 for s in client_sites:
     c=code(s); core="%s-Core"%c; acc="%s-Acc1"%c; fw="%s-FW"%c; ssw="%s-SrvSw"%c
     mx=site_mixed(s)
-    # mixed拠点ではサーバセグメントのSVIをFWへ(=サーバ⇔クライアント間はFWで分離)。
+    # in mixed sites, the server segment's SVI goes on the FW (= server<->client separated by the FW).
     cli_segs=[(k,e,vl) for (k,e,vl) in site_svis[s] if not (mx and k in server_seg)]
     srv_segs=[(k,e,vl) for (k,e,vl) in site_svis[s] if (mx and k in server_seg)]
     # client segments: SVI on Core, trunk Core<->Acc1
@@ -796,19 +799,19 @@ for batch in wrap([[sw,swp,[vn]] for (sw,swp,vn) in ep_access],CHUNK):
 for batch in wrap([[nm,"GigabitEthernet 0/0",[ip+"/24"]] for nm,ip,vn,st in servers],CHUNK):
     cmds.append('add ip_address_bulk "%s"'%dq(batch))
 
-# 6b) Internet WayPoint 共有セグメント
-# 構成: Internet WayPoint に SVI(Vlan N)を作成し、SVI 自体と
-#       各 Svc デバイスに接続している Internet 側の物理ポート (port 0, port 1, …) を
-#       同一 L2 セグメント (VlanIntSvc) にバインドする。
-# Svc デバイス側の GE0/0 は L3 インタフェースのまま変更しない。
+# 6b) Internet WayPoint shared segment
+# Configuration: create an SVI (Vlan N) on the Internet WayPoint, and bind the SVI itself and
+#       the Internet-side physical ports (port 0, port 1, ...) connected to each Svc device
+#       into the same L2 segment (VlanIntSvc).
+# The GE0/0 on the Svc-device side stays an L3 interface (unchanged).
 if DO_SRV and svcs:
     inet_svi="Vlan %d"%inet_vlan
-    # Internet WayPoint に SVI を追加
+    # add an SVI to the Internet WayPoint
     cmds.append('add virtual_port_bulk "%s"'%dq([["Internet",[inet_svi]]]))
-    # SVI 本体を L2 セグメントにバインド (RULE: SVI は必ず l2_segment_bulk でバインド)
+    # bind the SVI itself to an L2 segment (RULE: an SVI must always be bound via l2_segment_bulk)
     cmds.append('add l2_segment_bulk "%s"'%dq(
         [["Internet",inet_svi,[INET_VLAN_NAME]]]))
-    # Internet 側の各物理ポート (port N) を同一 L2 セグメントにバインド
+    # bind each Internet-side physical port (port N) to the same L2 segment
     inet_ports=[["Internet","port %d"%(inet_p_svc_start+i),[INET_VLAN_NAME]]
                 for i in range(len(svcs))]
     for batch in wrap(inet_ports,CHUNK):
@@ -838,11 +841,11 @@ if DO_SRV:
         for rec in sorted(oos,key=lambda x:(x[2],-x[4])):
             w.writerow(rec); reason_cnt[rec[2]]+=1
 
-# ---------- [FLOW] paste CSV (gen_flow_list.csv) : [FLOW]test2.xlsx 貼り付け用 ----------
-# 各行 = (Source/Dest デバイス名, proto, サービスポート) 単位。
-# Max.bandwidth(Mbps) = connection.transferBytes(受信+送信合計)*8 / activeDuration(秒)
-#   同一種別フローが複数あれば最大Mbpsを採用。Manual/Automatic routing列は対象外(空欄)。
-# デバイス名はマスタ定義名(SRV_*/PC_*/Svc_*)で出力。両端が解決できないフローは除外。
+# ---------- [FLOW] paste CSV (gen_flow_list.csv) : for pasting into [FLOW]test2.xlsx ----------
+# Each row = one (Source/Dest device name, proto, service port) unit.
+# Max.bandwidth(Mbps) = connection.transferBytes (received + sent total) * 8 / activeDuration (seconds)
+#   If multiple flows of the same kind exist, the max Mbps is used. The Manual/Automatic routing columns are out of scope (left blank).
+# Device names are output as the master-defined names (SRV_*/PC_*/Svc_*). Flows whose both ends cannot be resolved are excluded.
 FLOWFILE=os.path.join(OUTDIR,"gen_flow_list.csv")
 n_flow=0
 if not args.no_flow:
@@ -858,22 +861,22 @@ if not args.no_flow:
     def svc_label(port):
         nm=SERVNAME.get(port)
         return "%s(%d)"%(nm,port) if nm else str(port)
-    def fmt_bw(x):                         # Mbps を平易な小数で(1未満も保持、科学表記回避)
+    def fmt_bw(x):                         # Mbps as a plain decimal (keep values < 1, avoid scientific notation)
         if x<=0: return "0"
         if x>=1: return ("%.2f"%x).rstrip("0").rstrip(".")
-        d=min(max(2-int(math.floor(math.log10(x))),2),12)   # 有効数字3桁ぶんの小数桁
+        d=min(max(2-int(math.floor(math.log10(x))),2),12)   # decimal places for ~3 significant figures
         return ("%.*f"%(d,x)).rstrip("0").rstrip(".") or "0"
     srv_name_by_ip={ip:nm for nm,ip,vn,st in servers}
     svc_name_by_pp={(proto,port):nm for nm,proto,port,fl in svcs}
-    def dev_src(ip):                       # クライアント側(発信) -> マスタ名
+    def dev_src(ip):                       # client side (initiator) -> master name
         if ip in srv_name_by_ip: return srv_name_by_ip[ip]
         if is_inside(ip): return pc_name_by_seg.get(k24(ip))
         return None
-    def dev_dst(ip,proto,port):            # サーバ側(宛先) -> マスタ名
+    def dev_dst(ip,proto,port):            # server side (destination) -> master name
         if ip in srv_name_by_ip: return srv_name_by_ip[ip]
         if not is_inside(ip): return svc_name_by_pp.get((proto,port))
         return None
-    fmax=collections.defaultdict(float)    # (src,dst,proto,port) -> 最大 Mbps
+    fmax=collections.defaultdict(float)    # (src,dst,proto,port) -> max Mbps
     with open(CSV,newline="",encoding="utf-8",errors="replace") as fh:
         r=csv.reader(fh); cols=next(r); ix={c:i for i,c in enumerate(cols)}
         Sip=ix["searchSubject.ipAddress"];Pip=ix["peer.ipAddress"]
@@ -889,9 +892,9 @@ if not args.no_flow:
             if port<=0: continue
             s=dev_src(v[Sip]); d=dev_dst(v[Pip],proto,port)
             if not s or not d or s==d: continue
-            try: dur=float(v[Dur])/1000.0       # activeDuration は ミリ秒
+            try: dur=float(v[Dur])/1000.0       # activeDuration is in milliseconds
             except: dur=0.0
-            if dur<=0: continue                 # 接続時間0は速度算出不可のためスキップ
+            if dur<=0: continue                 # skip when duration is 0 (rate cannot be computed)
             try: by=float(v[By])
             except: by=0.0
             mbps=by*8.0/dur/1e6
