@@ -1,0 +1,33 @@
+# Generated output (kept out of version control)
+Output_data/*
+!Output_data/.gitkeep
+
+# Input exports are site-specific; don't commit real CV data
+Input_data/*
+!Input_data/.gitkeep
+
+# Generated artifacts if ever written next to the script
+# (brackets escaped so they match literally, not as glob char-classes)
+gen_*.csv
+gen_*.txt
+\[MASTER\]*.nsm
+\[L1_DIAGRAM\]*
+\[L2_DIAGRAM\]*
+\[L3_DIAGRAM\]*
+\[L1L2L3_DIAGRAM\]*
+\[DEVICE_TABLE\]*
+\[AI_Context\]*
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.env
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

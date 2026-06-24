@@ -1,0 +1,8 @@
+{
+    "_description": "Configuration file for cml_converter (Cisco Modeling Labs YAML -> Network Sketcher commands). Every key is optional; omit one to use its code default. Only 'value' is read by the script; 'description' and 'sample' are documentation only.",
+
+    "version": {
+        "value": 0.5,
+        "description": "Version of this configuration file schema."
+    }
+}

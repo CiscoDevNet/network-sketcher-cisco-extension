@@ -1,0 +1,67 @@
+{
+    "_description": "Configuration for cv_to_ns_commands.py (Cisco Cyber Vision CSV -> Network Sketcher). Every key is optional; omit one to use its code default. Only 'value' is read by the script; 'description' and 'sample' are documentation only. Zone classification is intentionally minimal-automatic: group_zone_override is the authoritative place to pin site-specific group names to a Purdue zone.",
+
+    "version": {
+        "value": 0.1,
+        "description": "Version of this configuration file schema."
+    },
+
+    "exclude_noise_groups": {
+        "value": true,
+        "description": "If true, components in noise_groups (broadcast/multicast/etc.) and any component without a routable IPv4 are dropped from the diagram and listed in out_of_scope.csv. Set false to draw everything.",
+        "sample": false
+    },
+
+    "noise_groups": {
+        "value": ["Broadcast Components", "IPv6 Components", "Packet Reply", "Multicast", "To be investigated", ""],
+        "description": "Cyber Vision group names treated as non-asset noise and excluded when exclude_noise_groups is true. The empty string '' matches ungrouped components.",
+        "sample": ["Broadcast Components", "Multicast"]
+    },
+
+    "synthesize_infrastructure": {
+        "value": true,
+        "description": "Cyber Vision does not export physical cabling. When true, the tool synthesises a CPwE-style logical backbone (ENT-Core <-> IDMZ-FW <-> IND-Core, with one Industrial-Ethernet access switch per Cell/Area zone) so that the diagram has L1/L2/L3 structure. Set false to emit endpoints with no switches/links.",
+        "sample": false
+    },
+
+    "group_zone_override": {
+        "value": {},
+        "description": "Authoritative Group -> Purdue zone mapping. Key = exact CV group name; value = one of ENTERPRISE | IDMZ | INDUSTRIAL | CELL. Overrides keyword/device-type inference. Use this to correct any group the auto-classifier (see gen_zone_assignment.csv) placed wrongly.",
+        "sample": {
+            "Enterprise Network": "ENTERPRISE",
+            "Control Center": "INDUSTRIAL",
+            "Process Bus Network": "CELL",
+            "Station Bus Network": "CELL"
+        }
+    },
+
+    "idmz_straddler_detection": {
+        "value": true,
+        "description": "If true, any asset whose activities reach BOTH an Enterprise-side zone and an Industrial-side zone is treated as an IT/OT bridge and relocated into the IDMZ. Such assets hang under a synthesised DMZ L2 switch (IDMZ-SW) placed to the LEFT of IDMZ-FW; the DMZ gateway SVI sits on the firewall. Requires synthesize_infrastructure=true to draw the switch.",
+        "sample": false
+    },
+
+    "idmz_enterprise_zones": {
+        "value": ["ENTERPRISE"],
+        "description": "Zones counted as the 'enterprise side' for straddler detection. A straddler must talk to at least one asset in one of these zones.",
+        "sample": ["ENTERPRISE"]
+    },
+
+    "idmz_industrial_zones": {
+        "value": ["INDUSTRIAL"],
+        "description": "Zones counted as the 'industrial side' for straddler detection. A straddler must also talk to at least one asset in one of these zones. Add 'CELL' to also pull in hosts that bridge enterprise and the plant-floor cell/area zones (broader IEC 62443 IDMZ scope).",
+        "sample": ["INDUSTRIAL", "CELL"]
+    },
+
+    "vlan_base": {
+        "value": 101,
+        "description": "First VLAN id; each area (Enterprise / IDMZ / Industrial / each Cell zone) is assigned the next id in sequence.",
+        "sample": 10
+    },
+
+    "devices_per_row": {
+        "value": 6,
+        "description": "Max number of endpoint devices placed per row inside an area's device_location grid (controls diagram width).",
+        "sample": 8
+    }
+}

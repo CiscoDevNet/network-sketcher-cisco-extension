@@ -1,0 +1,6 @@
+# aci_converter requires only the Python standard library (3.10+).
+#
+# The APIC Configuration Export is JSON, so everything is stdlib:
+#   argparse, csv, json, pathlib, re, sys, tarfile, collections, dataclasses, typing
+#
+# (intentionally empty — no third-party dependencies)

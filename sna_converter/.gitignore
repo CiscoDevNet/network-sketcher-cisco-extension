@@ -1,0 +1,20 @@
+# Generated output (kept out of version control)
+Output_data/*
+!Output_data/.gitkeep
+
+# Normalized intermediate files (UI-format inputs)
+**/_normalized_flow.csv
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.env
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

@@ -1,58 +1,84 @@
-**AGENTS.md is a simple, open format for guiding AI agents that works with your repository.**
+# AGENTS.md
 
-> Edit the following template to provide users with a better experience when working with coding agents (VS Code, GitHub Copilot, Cursor, Codex, Gemini CLI, etc.).
+Guidance for AI coding agents (VS Code, GitHub Copilot, Cursor, Codex, Gemini CLI, etc.) working in
+this repository.
 
-Provide the agent with information on which documentation and/or OpenAPI spec document to use.  
-For example, you can paste a direct link to the latest OpenAPI spec. 
-Direct link for Cisco Secure Access Authorization API:
-https://pubhub.devnetcloud.com/media/cloud-security-apis-in-eft/docs/secure-access/reference/auth/cisco_secure_access_token_authorization_api_2_0_0.yaml 
-
-Add information about the MCP servers needed for the project.
-
-You can add a link to the Cisco DevNet sandbox needed to work with the project. 
-Choose the direct link from the list here: https://devnetsandbox.cisco.com/DevNet
-
-Additionally, you can provide information about the version and link to the SDK, Infrastructure as Code provider/module, etc., which is recommended for use by coding Agents.
-
-Example of AGENTS.md file at Cisco DevNet GitHub org: [https://github.com/CiscoDevNet/python_code_samples_network/blob/master/AGENTS.md](https://github.com/CiscoDevNet/python_code_samples_network/blob/master/AGENTS.md)
-
-Example of AGENTS.md file at The Apache Software Foundation org: [https://github.com/apache/airflow/blob/main/AGENTS.md](https://github.com/apache/airflow/blob/main/AGENTS.md)
-
-**How to test AGENTS.md?**
-* You can test it with your favorite coding agents (VS Code, GitHub Copilot, Cursor, Codex, Gemini CLI, etc.).
-* Clone the repository containing the updated AGENTS.md and request guidance, such as: `How do I run this project with the [specified parameters]?`
-
-# Template:
+**What this project is:** `network-sketcher-cisco-extension` is a monorepo of standalone Python CLIs
+that turn Cisco platform data into [Network Sketcher](https://github.com/cisco-open/network-sketcher)
+CLI command scripts, so an L1/L2/L3 topology can be rebuilt automatically. Each tool lives in its own
+sub-directory (`aci_converter/`, `cml_converter/`, `cv_converter/`, `sna_converter/`) with its own
+`README.md` and `requirements.txt`, and can be used independently. **Conversion runs entirely on local
+files** — no live platform connection is needed at conversion time. Always read the root `README.md`
+and the relevant tool's `README.md` before making changes.
 
 ## Dev environment tips
 
-- **Python version**: Use Python 3.9+.
+- **Python version**: Use Python 3.10+ (works for all tools). `cv_converter` and `sna_converter` also
+  run on 3.8+. `aci_converter`, `cv_converter`, and `sna_converter` use the **standard library only**;
+  `cml_converter` needs `PyYAML` (optionally `ciscoconfparse2`).
 - **Virtual env (recommended)**:
   ```bash
   python3 -m venv .venv
-  source .venv/bin/activate
+  source .venv/bin/activate          # Windows: .\.venv\Scripts\Activate.ps1
   python -m pip install -U pip
+  ```
+- **Per-tool dependencies** (install only what the tool you are touching needs):
+  ```bash
+  pip install -r cml_converter/requirements.txt   # PyYAML (+ optional ciscoconfparse2)
+  pip install -r aci_converter/requirements.txt   # no-op (stdlib only)
   ```
 
 ### Quick run examples
 
+```bash
+# aci_converter — convert a (bundled, synthetic) APIC export into underlay + overlay command scripts
+python -m aci_converter.src.convert \
+    -i aci_converter/Input_data/sample_export.json \
+    -m both -o aci_converter/Output_data/ns_commands.txt
+
+# cml_converter — convert a CML lab YAML (+ embedded running-configs) into NS commands
+python -m cml_converter.src.convert --yaml /path/to/your_lab.yaml --out /tmp/ns_commands.txt
+
+# cv_converter — build an OT (Purdue/IEC 62443) topology from Cyber Vision CSV exports
+cd cv_converter && python cv_to_ns_commands.py            # auto-detects CSVs in Input_data/
+
+# sna_converter — reconstruct a topology + [FLOW] matrix from a NetFlow CSV (bundled sample)
+cd sna_converter && python sna_to_ns_commands.py          # uses Input_data/sample_flows.csv
+```
+
+Each tool writes a plain-text `ns_commands.txt` (one Network Sketcher CLI command per line; `#` lines
+are phase comments) plus supporting reports/CSVs into that tool's `Output_data/`.
 
 ## Testing instructions
 
-- **MCP server links**
-
-- **Test the code with the Cisco DevNet sandbox**
-  
-  Visit https://devnetsandbox.cisco.com/DevNet to book a related sandbox.
-  
-- **Latest Cisco API documentation**:
-  
-  https://developer.cisco.com/docs/
+- **No automated test suite yet.** Validate changes by running the affected tool against a bundled
+  sample (`aci_converter/Input_data/sample_export.json`, `sna_converter/Input_data/sample_flows.csv`)
+  or your own export, and confirm the emitted `ns_commands.txt` and reports look correct.
+- **Run the output in Network Sketcher (MCP server).** The generated commands are meant to be executed
+  against a Network Sketcher master file. If a `network-sketcher` MCP server is available, use it to
+  create an empty master, run the non-comment lines of `ns_commands.txt` in Phase 1→6 order, and export
+  the L1/L2/L3 diagram + device table to verify the topology. Otherwise install and run Network
+  Sketcher from https://github.com/cisco-open/network-sketcher.
+- **Cisco DevNet sandbox** (for the read-only fetch helpers, e.g. `aci_converter`'s `fetch_from_apic`):
+  book an ACI / APIC sandbox at https://devnetsandbox.cisco.com/DevNet.
+- **Latest Cisco API documentation**: https://developer.cisco.com/docs/
 
 ## PR instructions
 
-- **Security**: Do not commit real credentials or tokens. Use placeholders and document required env vars or files.
+- **Security**: Do not commit real credentials, tokens, or real platform exports. Read secrets from
+  environment variables (e.g. `ACI_PASSWORD`) and document any required env vars or input files. Use
+  synthetic/sanitized sample data (the bundled samples use RFC 5737 / RFC 1918 documentation IPs).
+- Add the license header to every new `.py` file:
+  ```python
+  # Copyright 2026 Cisco Systems, Inc. and its affiliates
+  # SPDX-License-Identifier: Apache-2.0
+  ```
 
 ## Contribution conventions
 
-- **Backward compatibility**: Do not change existing sample behavior unless clearly improving or fixing a bug; document changes.
+- **Backward compatibility**: Do not change a tool's existing output/behaviour unless clearly fixing a
+  bug or improving it; document the change in the tool's README.
+- **Code style**: PEP 8, type annotations on public functions, docstrings. Parse YAML with
+  `yaml.safe_load()` (never `yaml.load()`). Keep each tool self-contained (own `README.md` +
+  `requirements.txt`).
+- See [CONTRIBUTING.md](./CONTRIBUTING.md) for the full contribution guide.

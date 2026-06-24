@@ -1,0 +1,104 @@
+{
+    "_description": "Configuration file for csv_to_ns_commands.py (Cisco SNA/NetFlow CSV -> Network Sketcher commands). Every key is optional; omit one to use its code default. Only 'value' is read by the script; 'description' and 'sample' are documentation only. Manual lists/maps are always merged ON TOP of auto-detection (manual wins on conflict).",
+
+    "version": {
+        "value": 0.5,
+        "description": "Version of this configuration file schema."
+    },
+
+    "server_min_bytes": {
+        "value": 2000,
+        "description": "Minimum total transferBytes accumulated per (server IP, service port) for that port to count as a real, adopted service. Ports below this are treated as noise, and such IPs are dropped to out_of_scope_ips.csv. Raise to keep only heavy services (e.g. 20000-50000 for large captures); lower to catch lightly-used ones.",
+        "sample": 50000
+    },
+
+    "require_tcp_synack": {
+        "value": true,
+        "description": "If true, a TCP flow counts as a server connection only when peer.synAckPackets > 0 (the server actually accepted/ACKed the connection), filtering scans and one-way attempts. Set false to count any TCP flow regardless of handshake.",
+        "sample": false
+    },
+
+    "include_udp": {
+        "value": true,
+        "description": "If true, UDP flows (which have no SYN-ACK) are eligible as services. Set false to consider TCP services only.",
+        "sample": false
+    },
+
+    "subnet_min_flows": {
+        "value": 5,
+        "description": "Minimum number of flows observed on a /24 subnet for that subnet to be adopted as a VLAN/segment. Filters out sparsely-seen subnets. Raise for large captures (e.g. 50-100) to keep only busy subnets; lower for small datasets.",
+        "sample": 100
+    },
+
+    "auto_inside_public": {
+        "value": true,
+        "description": "Enable automatic detection of your own PUBLIC IP ranges (treated as Inside in addition to RFC1918). A /16 is flagged Inside when outbound-initiated flows dominate (your users/proxies reaching the Internet). Manual inside_public is always added on top.",
+        "sample": false
+    },
+
+    "inside_outinit_min": {
+        "value": 2000,
+        "description": "Auto inside_public threshold: a public /16 needs at least this many outbound-initiated flows to be considered your own range. Higher is stricter.",
+        "sample": 3000
+    },
+
+    "inside_outinit_ratio": {
+        "value": 0.6,
+        "description": "Auto inside_public threshold: outbound-initiated flows must be at least this fraction (0.0-1.0) of all flows seen for that /16. Higher is stricter (closer to purely-outbound behavior).",
+        "sample": 0.7
+    },
+
+    "inside_public": {
+        "value": ["198.18.", "198.19."],
+        "description": "Manual list of public IP prefixes to force-treat as Inside (your organization). Matched by STRING PREFIX (not CIDR), so always end each entry with a dot. Default includes 198.18./198.19. (the 198.18.0.0/15 IETF benchmark range, commonly used as production-like addressing in Cisco dCloud/CML labs) so lab captures are not silently dropped as special-use.",
+        "sample": ["209.182.", "198.51."]
+    },
+
+    "auto_dc_regions": {
+        "value": true,
+        "description": "Enable automatic Datacenter (server-side, TOP row) site detection. A /16 region is auto-DC when it has no user-LAN subnets and server flows dominate client flows. Manual dc_force_regions is always added on top.",
+        "sample": false
+    },
+
+    "dc_force_regions": {
+        "value": [],
+        "description": "Manual list of /16 regions to force-classify as Datacenter (placed on the TOP row with a DC-FW/DC-Core stack). Entries are the first two octets only, no trailing dot. This is /16-granular; for arbitrary CIDR-based Datacenter sites use site_cidrs + site_cidr_dc instead.",
+        "sample": ["10.192", "209.182"]
+    },
+
+    "auto_spur_regions": {
+        "value": true,
+        "description": "Enable automatic spur (isolated standalone site) detection. A campus /16 becomes a spur when its strongest link to any hub/seed is weak relative to its own internal flows (see spur_link_ratio). Manual spur_regions is always added on top.",
+        "sample": false
+    },
+
+    "spur_link_ratio": {
+        "value": 0.05,
+        "description": "Spur threshold: if a region's strongest inter-region link to a seed is below ratio * (its internal flows), it is treated as an isolated spur site. Higher means more regions become spurs.",
+        "sample": 0.1
+    },
+
+    "spur_regions": {
+        "value": [],
+        "description": "Manual list of /16 regions to force into their own standalone (spur) site instead of merging into a campus hub. Entries are the first two octets only, no trailing dot. This is /16-granular; for arbitrary CIDR-based sites use site_cidrs instead.",
+        "sample": ["10.241"]
+    },
+
+    "name_map": {
+        "value": {},
+        "description": "Rename auto-grouped campus SEED (/16 hub) regions to human-friendly site names. Key = the seed region's first two octets; value = display name. This only RELABELS existing auto-detected hub sites; it does NOT define site membership by IP range. To define a site by an IP range / CIDR, use site_cidrs.",
+        "sample": { "10.10": "NewYork", "10.201": "Atlanta" }
+    },
+
+    "site_cidrs": {
+        "value": {},
+        "description": "Define sites explicitly by arbitrary CIDR subnets. Key = CIDR (e.g. \"10.10.0.0/16\", \"10.20.30.0/24\", \"192.168.100.0/22\"), value = site name. Any CIDR prefix length is accepted. This OVERRIDES the automatic /16 region grouping for any subnet it covers, and the longest-prefix match wins on overlap. Grouping granularity is /24: a CIDR wider than /24 claims all contained /24s; a CIDR narrower than /24 claims the whole overlapping /24. Use this to carve out a server farm, merge several ranges into one named site, or split a /16 across multiple sites.",
+        "sample": { "10.10.0.0/16": "Tokyo", "10.20.30.0/24": "Tokyo-ServerFarm", "192.168.100.0/22": "BranchOsaka" }
+    },
+
+    "site_cidr_dc": {
+        "value": [],
+        "description": "Among the sites defined in site_cidrs, the names that should be treated as Datacenter/server sites (TOP row, DC-FW/DC-Core layout). Names must match the values used in site_cidrs. Sites not listed here are classified automatically from their own server/client subnet mix.",
+        "sample": ["Tokyo-ServerFarm"]
+    }
+}

@@ -1,0 +1,7 @@
+# sna_to_ns_commands.py has NO third-party dependencies.
+# It runs on the Python standard library only (Python 3.8+).
+#
+# Tested on Windows, macOS and Ubuntu with CPython 3.8 - 3.12.
+# This file is intentionally empty of packages; it exists so that
+#   pip install -r requirements.txt
+# succeeds as a no-op in CI / setup scripts.

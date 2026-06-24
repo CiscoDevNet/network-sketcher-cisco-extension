@@ -1,0 +1,13 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Editor / tooling
+.claude/
+.venv/
+venv/
+
+# Generated tool outputs (keep the directory via .gitkeep)
+*/Output_data/*
+!*/Output_data/.gitkeep

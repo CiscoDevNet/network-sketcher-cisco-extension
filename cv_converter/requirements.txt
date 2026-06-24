@@ -1,0 +1,6 @@
+# cv_converter has NO third-party dependencies.
+# cv_to_ns_commands.py uses only the Python 3.8+ standard library:
+#   argparse, csv, ipaddress, json, math, os, sys, collections, dataclasses,
+#   datetime, typing
+#
+# Tested on CPython 3.8-3.12 (Windows, macOS, Linux).

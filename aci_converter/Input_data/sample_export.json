@@ -1,0 +1,133 @@
+{
+  "totalCount": "synthetic-sample",
+  "_comment": "Synthetic ACI sample for aci_converter (no real fabric data). Uses RFC5737 documentation IPs (192.0.2.0/24, 198.51.100.0/24, 203.0.113.0/24) and synthetic MACs. Shape mirrors a default `fetch_from_apic` pull: policy model (fvTenant subtree) + operational topology (fabricNode/topSystem/lldpAdjEp/fvCEp) + vPC. Fabric: 2 spine + 2 leaf + 1 APIC. Tenant 'ExampleCorp' shows a server EPG (App, individual SRV_), a client EPG (Web, collapsed PC_), and a second 'Web' EPG in the same BD across another App Profile (demonstrates the <BD>-<AP>-<EPG> naming).",
+  "imdata": [
+    {"fabricNode": {"attributes": {"dn": "topology/pod-1/node-201", "id": "201", "name": "spine-201", "role": "spine", "model": "N9K-C9332C", "serial": "SAL-SP-201"}}},
+    {"fabricNode": {"attributes": {"dn": "topology/pod-1/node-202", "id": "202", "name": "spine-202", "role": "spine", "model": "N9K-C9332C", "serial": "SAL-SP-202"}}},
+    {"fabricNode": {"attributes": {"dn": "topology/pod-1/node-101", "id": "101", "name": "leaf-101", "role": "leaf", "model": "N9K-C93180YC-EX", "serial": "SAL-LF-101"}}},
+    {"fabricNode": {"attributes": {"dn": "topology/pod-1/node-102", "id": "102", "name": "leaf-102", "role": "leaf", "model": "N9K-C93180YC-EX", "serial": "SAL-LF-102"}}},
+    {"fabricNode": {"attributes": {"dn": "topology/pod-1/node-1", "id": "1", "name": "apic1", "role": "controller", "model": "APIC-SERVER-M3", "serial": "SAL-APIC-1"}}},
+
+    {"fabricNodeIdentP": {"attributes": {"dn": "uni/controller/nodeidentpol/nodep-SAL-SP-201", "nodeId": "201", "name": "spine-201", "role": "spine", "serial": "SAL-SP-201"}}},
+    {"fabricNodeIdentP": {"attributes": {"dn": "uni/controller/nodeidentpol/nodep-SAL-SP-202", "nodeId": "202", "name": "spine-202", "role": "spine", "serial": "SAL-SP-202"}}},
+    {"fabricNodeIdentP": {"attributes": {"dn": "uni/controller/nodeidentpol/nodep-SAL-LF-101", "nodeId": "101", "name": "leaf-101", "role": "leaf", "serial": "SAL-LF-101"}}},
+    {"fabricNodeIdentP": {"attributes": {"dn": "uni/controller/nodeidentpol/nodep-SAL-LF-102", "nodeId": "102", "name": "leaf-102", "role": "leaf", "serial": "SAL-LF-102"}}},
+
+    {"topSystem": {"attributes": {"dn": "topology/pod-1/node-201/sys", "name": "spine-201", "role": "spine", "podId": "1", "version": "n9000-15.2(7f)", "oobMgmtAddr": "192.0.2.201", "address": "10.0.0.201"}}},
+    {"topSystem": {"attributes": {"dn": "topology/pod-1/node-202/sys", "name": "spine-202", "role": "spine", "podId": "1", "version": "n9000-15.2(7f)", "oobMgmtAddr": "192.0.2.202", "address": "10.0.0.202"}}},
+    {"topSystem": {"attributes": {"dn": "topology/pod-1/node-101/sys", "name": "leaf-101", "role": "leaf", "podId": "1", "version": "n9000-15.2(7f)", "oobMgmtAddr": "192.0.2.101", "address": "10.0.0.101"}}},
+    {"topSystem": {"attributes": {"dn": "topology/pod-1/node-102/sys", "name": "leaf-102", "role": "leaf", "podId": "1", "version": "n9000-15.2(7f)", "oobMgmtAddr": "192.0.2.102", "address": "10.0.0.102"}}},
+    {"topSystem": {"attributes": {"dn": "topology/pod-1/node-1/sys", "name": "apic1", "role": "controller", "podId": "1", "version": "5.2(7f)", "oobMgmtAddr": "192.0.2.11", "address": "10.0.0.1"}}},
+
+    {"lldpAdjEp": {"attributes": {"dn": "topology/pod-1/node-101/sys/lldp/inst/if-[eth1/49]/adj-1", "sysName": "spine-201", "portDesc": "eth1/1"}}},
+    {"lldpAdjEp": {"attributes": {"dn": "topology/pod-1/node-101/sys/lldp/inst/if-[eth1/50]/adj-1", "sysName": "spine-202", "portDesc": "eth1/1"}}},
+    {"lldpAdjEp": {"attributes": {"dn": "topology/pod-1/node-102/sys/lldp/inst/if-[eth1/49]/adj-1", "sysName": "spine-201", "portDesc": "eth1/2"}}},
+    {"lldpAdjEp": {"attributes": {"dn": "topology/pod-1/node-102/sys/lldp/inst/if-[eth1/50]/adj-1", "sysName": "spine-202", "portDesc": "eth1/2"}}},
+    {"lldpAdjEp": {"attributes": {"dn": "topology/pod-1/node-101/sys/lldp/inst/if-[eth1/1]/adj-1", "sysName": "apic1", "portDesc": "eth2-1"}}},
+
+    {"fabricExplicitGEp": {"attributes": {"dn": "uni/fabric/protpol/expgep-vpc-101-102", "name": "vpc-101-102"}}},
+    {"fabricNodePEp": {"attributes": {"dn": "uni/fabric/protpol/expgep-vpc-101-102/nodepep-101", "id": "101"}}},
+    {"fabricNodePEp": {"attributes": {"dn": "uni/fabric/protpol/expgep-vpc-101-102/nodepep-102", "id": "102"}}},
+    {"vpcDom": {"attributes": {"dn": "topology/pod-1/node-101/sys/vpc/dom", "id": "101"}}},
+
+    {"fvTenant": {
+      "attributes": {"dn": "uni/tn-ExampleCorp", "name": "ExampleCorp"},
+      "children": [
+        {"fvCtx": {"attributes": {"rn": "ctx-Prod-VRF", "name": "Prod-VRF"}}},
+        {"fvBD": {
+          "attributes": {"rn": "BD-Web-BD", "name": "Web-BD"},
+          "children": [
+            {"fvRsCtx": {"attributes": {"rn": "rsctx", "tnFvCtxName": "Prod-VRF"}}},
+            {"fvSubnet": {"attributes": {"rn": "subnet-[192.0.2.1/24]", "ip": "192.0.2.1/24", "scope": "private"}}}
+          ]
+        }},
+        {"fvBD": {
+          "attributes": {"rn": "BD-App-BD", "name": "App-BD"},
+          "children": [
+            {"fvRsCtx": {"attributes": {"rn": "rsctx", "tnFvCtxName": "Prod-VRF"}}},
+            {"fvSubnet": {"attributes": {"rn": "subnet-[198.51.100.1/24]", "ip": "198.51.100.1/24", "scope": "private"}}}
+          ]
+        }},
+        {"fvAp": {
+          "attributes": {"rn": "ap-Shop", "name": "Shop"},
+          "children": [
+            {"fvAEPg": {
+              "attributes": {"rn": "epg-Web", "name": "Web"},
+              "children": [
+                {"fvRsBd": {"attributes": {"rn": "rsbd", "tnFvBDName": "Web-BD"}}},
+                {"fvRsCons": {"attributes": {"rn": "rscons-App-Access", "tnVzBrCPName": "App-Access"}}},
+                {"fvRsPathAtt": {"attributes": {"rn": "rspathAtt-[topology/pod-1/protpaths-101-102/pathep-[vpc-101-102]]", "tDn": "topology/pod-1/protpaths-101-102/pathep-[vpc-101-102]", "encap": "vlan-110"}}}
+              ]
+            }},
+            {"fvAEPg": {
+              "attributes": {"rn": "epg-App", "name": "App"},
+              "children": [
+                {"fvRsBd": {"attributes": {"rn": "rsbd", "tnFvBDName": "App-BD"}}},
+                {"fvRsProv": {"attributes": {"rn": "rsprov-App-Access", "tnVzBrCPName": "App-Access"}}},
+                {"fvRsPathAtt": {"attributes": {"rn": "rspathAtt-[topology/pod-1/protpaths-101-102/pathep-[vpc-101-102]]", "tDn": "topology/pod-1/protpaths-101-102/pathep-[vpc-101-102]", "encap": "vlan-120"}}}
+              ]
+            }}
+          ]
+        }},
+        {"fvAp": {
+          "attributes": {"rn": "ap-Shop2", "name": "Shop2"},
+          "children": [
+            {"fvAEPg": {
+              "attributes": {"rn": "epg-Web", "name": "Web"},
+              "children": [
+                {"fvRsBd": {"attributes": {"rn": "rsbd", "tnFvBDName": "Web-BD"}}},
+                {"fvRsCons": {"attributes": {"rn": "rscons-App-Access", "tnVzBrCPName": "App-Access"}}}
+              ]
+            }}
+          ]
+        }},
+        {"vzFilter": {
+          "attributes": {"rn": "flt-https", "name": "https"},
+          "children": [
+            {"vzEntry": {"attributes": {"rn": "e-https", "name": "https", "etherType": "ip", "prot": "tcp", "dFromPort": "https", "dToPort": "https"}}}
+          ]
+        }},
+        {"vzBrCP": {
+          "attributes": {"rn": "brc-App-Access", "name": "App-Access", "scope": "context"},
+          "children": [
+            {"vzSubj": {
+              "attributes": {"rn": "subj-app", "name": "app"},
+              "children": [
+                {"vzRsSubjFiltAtt": {"attributes": {"rn": "rssubjFiltAtt-https", "tnVzFilterName": "https"}}}
+              ]
+            }}
+          ]
+        }},
+        {"l3extOut": {
+          "attributes": {"rn": "out-Internet", "name": "Internet"},
+          "children": [
+            {"l3extRsEctx": {"attributes": {"rn": "rsectx", "tnFvCtxName": "Prod-VRF"}}},
+            {"l3extLNodeP": {
+              "attributes": {"rn": "lnodep-BL", "name": "BL"},
+              "children": [
+                {"l3extRsNodeL3OutAtt": {"attributes": {"rn": "rsnodeL3OutAtt-[topology/pod-1/node-101]", "tDn": "topology/pod-1/node-101", "rtrId": "203.0.113.1"}}}
+              ]
+            }}
+          ]
+        }}
+      ]
+    }},
+
+    {"fvCEp": {"attributes": {"dn": "uni/tn-ExampleCorp/ap-Shop/epg-App/cep-00:DE:AD:00:01:01", "mac": "00:DE:AD:00:01:01", "encap": "vlan-120"}}},
+    {"fvIp": {"attributes": {"dn": "uni/tn-ExampleCorp/ap-Shop/epg-App/cep-00:DE:AD:00:01:01/ip-[198.51.100.10]", "addr": "198.51.100.10"}}},
+    {"fvRsCEpToPathEp": {"attributes": {"dn": "uni/tn-ExampleCorp/ap-Shop/epg-App/cep-00:DE:AD:00:01:01/rscEpToPathEp-[topology/pod-1/protpaths-101-102/pathep-[vpc-101-102]]", "tDn": "topology/pod-1/protpaths-101-102/pathep-[vpc-101-102]"}}},
+
+    {"fvCEp": {"attributes": {"dn": "uni/tn-ExampleCorp/ap-Shop/epg-App/cep-00:DE:AD:00:01:02", "mac": "00:DE:AD:00:01:02", "encap": "vlan-120"}}},
+    {"fvIp": {"attributes": {"dn": "uni/tn-ExampleCorp/ap-Shop/epg-App/cep-00:DE:AD:00:01:02/ip-[198.51.100.11]", "addr": "198.51.100.11"}}},
+    {"fvRsCEpToPathEp": {"attributes": {"dn": "uni/tn-ExampleCorp/ap-Shop/epg-App/cep-00:DE:AD:00:01:02/rscEpToPathEp-[topology/pod-1/protpaths-101-102/pathep-[vpc-101-102]]", "tDn": "topology/pod-1/protpaths-101-102/pathep-[vpc-101-102]"}}},
+
+    {"fvCEp": {"attributes": {"dn": "uni/tn-ExampleCorp/ap-Shop/epg-Web/cep-00:DE:AD:00:02:01", "mac": "00:DE:AD:00:02:01", "encap": "vlan-110"}}},
+    {"fvIp": {"attributes": {"dn": "uni/tn-ExampleCorp/ap-Shop/epg-Web/cep-00:DE:AD:00:02:01/ip-[192.0.2.10]", "addr": "192.0.2.10"}}},
+
+    {"fvCEp": {"attributes": {"dn": "uni/tn-ExampleCorp/ap-Shop/epg-Web/cep-00:DE:AD:00:02:02", "mac": "00:DE:AD:00:02:02", "encap": "vlan-110"}}},
+    {"fvIp": {"attributes": {"dn": "uni/tn-ExampleCorp/ap-Shop/epg-Web/cep-00:DE:AD:00:02:02/ip-[192.0.2.11]", "addr": "192.0.2.11"}}},
+
+    {"fvCEp": {"attributes": {"dn": "uni/tn-ExampleCorp/ap-Shop/epg-Web/cep-00:DE:AD:00:02:03", "mac": "00:DE:AD:00:02:03", "encap": "vlan-110"}}},
+    {"fvIp": {"attributes": {"dn": "uni/tn-ExampleCorp/ap-Shop/epg-Web/cep-00:DE:AD:00:02:03/ip-[192.0.2.12]", "addr": "192.0.2.12"}}}
+  ]
+}

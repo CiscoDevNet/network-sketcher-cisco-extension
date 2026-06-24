@@ -1,0 +1,62 @@
+{
+    "version": {
+        "value": 0.5,
+        "description": "aci_converter config schema version.",
+        "sample": 0.5
+    },
+    "tenant_include": {
+        "value": [],
+        "description": "Logical mode: if non-empty, ONLY these tenant names are converted. Overrides tenant_exclude.",
+        "sample": ["Production", "Dev"]
+    },
+    "tenant_exclude": {
+        "value": ["mgmt", "infra", "common"],
+        "description": "Logical mode: tenant names to skip (system tenants). Ignored when tenant_include is set.",
+        "sample": ["mgmt", "infra"]
+    },
+    "treat_controller_as": {
+        "value": "Server",
+        "description": "NS stencil type for APIC controller nodes (physical mode): 'Server' or 'PC'.",
+        "sample": "PC"
+    },
+    "spine_leaf_naming": {
+        "value": "name",
+        "description": "Device-name source for fabric nodes: 'name' (fabricNodeIdentP name), 'nodeid' (e.g. leaf-101), or 'name_nodeid'.",
+        "sample": "name_nodeid"
+    },
+    "border_leaf_node_ids": {
+        "value": [],
+        "description": "Physical mode: node IDs to force-flag as border leafs when L3Out auto-detection is insufficient.",
+        "sample": ["101", "102"]
+    },
+    "apic_uplinks_per_leaf": {
+        "value": 2,
+        "description": "Physical mode: how many leafs each APIC dual-homes to when synthesizing APIC<->leaf links.",
+        "sample": 2
+    },
+    "synthesize_endpoints": {
+        "value": false,
+        "description": "Physical mode (reserved for Phase 2): create endpoint placeholders + leaf-port L2 bindings from fvRsPathAtt static path bindings.",
+        "sample": true
+    },
+    "vlan_base": {
+        "value": 101,
+        "description": "Overlay mode: first synthetic VLAN id used for a BD that has no encap VLAN from fvRsPathAtt static bindings.",
+        "sample": 1001
+    },
+    "max_endpoints_per_epg": {
+        "value": 50,
+        "description": "Overlay/unified: cap on real endpoints (fvCEp) drawn per EPG; excess are noted in the report. Lower for very large fabrics.",
+        "sample": 20
+    },
+    "emit_bidirectional_flows": {
+        "value": true,
+        "description": "Flow list: emit both consumer->provider and provider->consumer rows for each contract filter.",
+        "sample": false
+    },
+    "color_overrides": {
+        "value": {},
+        "description": "Map of NS device name -> [R,G,B] to override the role-based colour (reserved).",
+        "sample": {"leaf-101": [255, 204, 204]}
+    }
+}

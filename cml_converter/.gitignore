@@ -1,0 +1,12 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.venv/
+*.egg
+.env
+ns_commands.txt
+ns_model.json
+stencil_mapping.csv
+parse_report.md
