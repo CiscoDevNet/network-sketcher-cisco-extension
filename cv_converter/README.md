@@ -188,3 +188,7 @@ To get meaningful bandwidth from Cyber Vision:
 - **Highest accuracy** — pair CV (asset/zone context) with NetFlow/IPFIX → Cisco Secure
   Network Analytics, which carries true per-flow `activeDuration` (the `sna_converter`
   input).
+
+## Author
+
+Yusuke Ogawa - Architect, Cisco | CCIE#17583

@@ -132,6 +132,10 @@ This tool bridges two Cisco technologies:
 - **Network Sketcher** — open-source Cisco tool for designing and documenting
   network topologies using an AI-native CLI
 
+## Author
+
+Yusuke Ogawa - Architect, Cisco | CCIE#17583
+
 ## License
 
 Apache License 2.0 — see [LICENSE](../LICENSE).

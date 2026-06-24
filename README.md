@@ -440,6 +440,10 @@ and [SECURITY.md](./SECURITY.md).
 - [CiscoDevNet/cml-community](https://github.com/CiscoDevNet/cml-community) —
   public CML labs used to validate the converter.
 
+## Author
+
+Yusuke Ogawa - Architect, Cisco | CCIE#17583
+
 ## License
 
 This project is licensed under the [Apache License 2.0](./LICENSE). See the

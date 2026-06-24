@@ -351,3 +351,7 @@ Every key is `{value, description, sample}`; only `value` is read. Key options:
 (`Server` | `PC`), `spine_leaf_naming`, `border_leaf_node_ids`,
 `apic_uplinks_per_leaf`, `vlan_base` (first synthetic BD VLAN id),
 `max_endpoints_per_epg`, and `emit_bidirectional_flows`.
+
+## Author
+
+Yusuke Ogawa - Architect, Cisco | CCIE#17583
