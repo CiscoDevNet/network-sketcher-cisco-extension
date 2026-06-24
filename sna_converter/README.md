@@ -239,4 +239,6 @@ Yusuke Ogawa - Architect, Cisco | CCIE#17583
 
 ## License
 
-Apache License 2.0.
+This tool is part of the **Network Sketcher Cisco Extension** project, licensed
+under the [Apache License 2.0](../LICENSE). See the [NOTICE](../NOTICE) file for
+copyright and third-party attributions.

@@ -355,3 +355,9 @@ Every key is `{value, description, sample}`; only `value` is read. Key options:
 ## Author
 
 Yusuke Ogawa - Architect, Cisco | CCIE#17583
+
+## License
+
+This tool is part of the **Network Sketcher Cisco Extension** project, licensed
+under the [Apache License 2.0](../LICENSE). See the [NOTICE](../NOTICE) file for
+copyright and third-party attributions.
