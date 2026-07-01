@@ -119,13 +119,21 @@ NS" and "what it means in ACI".**
 | ACI object | NS representation |
 |------------|-------------------|
 | **Tenant** (`fvTenant`) | an **area** (one per tenant) |
-| **VRF** (`fvCtx`) | a synthesised **gateway device** `<tenant>-<vrf>-GW`, and an `l3_instance` (VRF) tag on its SVIs |
-| **Bridge Domain** (`fvBD`) | **one shared L2 segment (a VLAN)** = the broadcast domain (see §2) |
+| **VRF** (`fvCtx`) | a synthesised **gateway device** `VRF-GW:<tenant>-<vrf>`, and an `l3_instance` (VRF) tag on its SVIs |
+| **Bridge Domain** (`fvBD`) | **one shared L2 segment (a VLAN)** = the broadcast domain — **not a device** (see §2) |
 | **BD subnet** (`fvSubnet`) | an **SVI** `Vlan <id>` on the VRF gateway + the subnet IP + `l3_instance` = VRF (this is the distributed anycast gateway) |
-| **EPG** (`fvAEPg`) | a **device** named `<BD>-<AP>-<EPG>` (see §3), a *member* of its BD's L2 segment |
+| **EPG** (`fvAEPg`) | a **device** named `EPG:<BD>-<AP>-<EPG>` (see §3), a *member* of its BD's L2 segment |
 | **Endpoint** (`fvCEp`/`fvIp`) | a **host device** with its real IP on an L3 port (see §4) |
 | **Contract** (`vzBrCP`) | **NOT a link** — a row in `gen_flow_list.csv` (see §5) |
 | **L3Out** (`l3extOut`) | a gray **cloud waypoint** linked to the VRF gateway |
+
+> [!TIP]
+> Every overlay device name starts with (or is) a **type prefix** —
+> `EPG:`, `VRF-GW:`, `SRV_`, `PC_`, `L3Out-` — precisely so a Bridge Domain,
+> which has **no device of its own**, is never confused with an EPG device. If
+> you see `EPG:Hero_Land-Save_The_Planet-web`, that is an **EPG** named `web`
+> (in App Profile `Save_The_Planet`) that is a *member* of BD `Hero_Land` — it
+> is **not** the Bridge Domain itself.
 
 ### 2. How a Bridge Domain is represented — and what the segment value is
 
@@ -142,26 +150,29 @@ NS" and "what it means in ACI".**
 - **Why `Vlan <id>` and not the BD name?** The same VLAN also carries the
   anycast-gateway **SVI** on the VRF gateway, and Network Sketcher requires an
   SVI to be a numeric `Vlan <id>` (it rejects e.g. `Vlan Web-BD`). Naming
-  the segment after the BD would break the SVI↔segment gateway linkage. The BD
-  name is instead surfaced in the **EPG device name** and in each EPG's
-  `BD <name>` attribute.
+  the segment after the BD would break the SVI↔segment gateway linkage. **A BD
+  therefore has no device of its own** — the BD name is instead surfaced in
+  the **EPG device name** (see §3) and in each EPG's `BD <name>` attribute.
 
-### 3. EPG device naming — `<BD>-<AP>-<EPG>`
+### 3. EPG device naming — `EPG:<BD>-<AP>-<EPG>`
 
 An EPG's true identity in ACI is **`tenant / Application-Profile / EPG`** — EPG
 short names repeat across Application Profiles (and even within one BD). So the
-device name includes the **BD** (broadcast-domain context) **and** the
-**Application Profile** (disambiguation):
+device name is the **`EPG:`** type prefix followed by the **BD**
+(broadcast-domain context) and the **Application Profile** (disambiguation):
 
 ```
-App-BD-Shop-App    = BD "App-BD", AppProfile "Shop",  EPG "App"
-Web-BD-Shop2-Web   = BD "Web-BD", AppProfile "Shop2", EPG "Web"
+EPG:App-BD-Shop-App    = an EPG named "App"  in AppProfile "Shop",  member of BD "App-BD"
+EPG:Web-BD-Shop2-Web    = an EPG named "Web"  in AppProfile "Shop2", member of BD "Web-BD"
 ```
 
-> Without the AppProfile, the two EPGs named `Web` that share BD `Web-BD` (in App
-> Profiles `Shop` and `Shop2`) would collide and get a meaningless `_2` suffix.
-> `<BD>-<AP>-<EPG>` keeps every name unique and self-explanatory. The full
-> `AP/EPG` is also in the device's **Model** attribute (e.g. `EPG Shop2/Web`).
+> **The `EPG:` prefix matters.** Without it, `Hero_Land-Save_The_Planet-web`
+> reads like it could *be* the Bridge Domain `Hero_Land` — it is not; BDs are
+> never devices (§2). And without the AppProfile, the two EPGs named `Web` that
+> share BD `Web-BD` (in App Profiles `Shop` and `Shop2`) would collide and get a
+> meaningless `_2` suffix. `EPG:<BD>-<AP>-<EPG>` keeps every name unique,
+> self-explanatory, and unambiguously typed. The full `AP/EPG` is also in the
+> device's **Model** attribute (e.g. `EPG Shop2/Web`).
 
 ### 4. Endpoints — servers are L3 hosts, clients collapse
 
@@ -202,18 +213,18 @@ This is the bundled `Input_data/sample_export.json` (tenant `ExampleCorp`):
 
 ```
 Area  "ExampleCorp"  (tenant)
-  ExampleCorp-Prod-VRF-GW                 ← VRF gateway (anycast GW); SVIs Vlan110=192.0.2.1/24, Vlan120=198.51.100.1/24; VRF Prod-VRF
-    Vlan110  (broadcast domain = BD "Web-BD")
-      ├─ Web-BD-Shop-Web                   ← EPG (client), member of Vlan110
+  VRF-GW:ExampleCorp-Prod-VRF             ← VRF gateway (anycast GW); SVIs Vlan110=192.0.2.1/24, Vlan120=198.51.100.1/24; VRF Prod-VRF
+    Vlan110  (broadcast domain = BD "Web-BD" — no device; EPGs below are MEMBERS of it)
+      ├─ EPG:Web-BD-Shop-Web               ← EPG "Web" in AP "Shop", member of Vlan110
       │    └─ PC_Shop-Web_3  (Dummy 0 = 192.0.2.10/32, 192.0.2.11/32, 192.0.2.12/32)   ← 3 clients collapsed, L3
-      └─ Web-BD-Shop2-Web                  ← EPG (client), member of Vlan110
-    Vlan120  (broadcast domain = BD "App-BD")
-      └─ App-BD-Shop-App                   ← EPG (server), member of Vlan120
+      └─ EPG:Web-BD-Shop2-Web              ← EPG "Web" in AP "Shop2", member of Vlan110
+    Vlan120  (broadcast domain = BD "App-BD" — no device)
+      └─ EPG:App-BD-Shop-App               ← EPG "App" in AP "Shop", member of Vlan120
            ├─ SRV_Shop-App_1  (Dummy 0 = 198.51.100.10/32)   ← server endpoint, L3
            └─ SRV_Shop-App_2  (Dummy 0 = 198.51.100.11/32)
 ```
 
-Both `Web` EPGs share **one** `Vlan110` segment (= BD `Web-BD`); the contract
+Both `EPG:Web-BD-*` devices share **one** `Vlan110` segment (= BD `Web-BD`); the contract
 `Web → App` between them appears in `gen_flow_list.csv`, not as a link.
 
 ---
@@ -238,7 +249,7 @@ Both `Web` EPGs share **one** `Vlan110` segment (= BD `Web-BD`); the contract
 >   not a host.
 > - **The VRF gateway is one node, but the real anycast gateway is distributed**
 >   across every leaf where the BD is deployed. We draw a single
->   `<tenant>-<vrf>-GW` for readability.
+>   `VRF-GW:<tenant>-<vrf>` for readability.
 > - **Contracts lose scope nuance.** Flows are the `provider × consumer`
 >   cross-product within a tenant; `vzBrCP.scope` (global / VRF / tenant /
 >   app-profile) and `vzCPIf` (exported contracts) are not enforced, so flows can
@@ -274,7 +285,7 @@ above for the full detail; the one-line summary:
 
 | ACI | NS |
 |-----|-----|
-| Tenant / VRF / BD / EPG / endpoint / L3Out / contract | area / `<tenant>-<vrf>-GW` + SVI / shared `Vlan <id>` segment / `<BD>-<AP>-<EPG>` device / `SRV_*`·`PC_*` host / cloud waypoint / `[Flow_List]` row |
+| Tenant / VRF / BD / EPG / endpoint / L3Out / contract | area / `VRF-GW:<tenant>-<vrf>` + SVI / shared `Vlan <id>` segment (no device) / `EPG:<BD>-<AP>-<EPG>` device / `SRV_*`·`PC_*` host / cloud waypoint / `[Flow_List]` row |
 
 ## Device color conventions
 
@@ -343,6 +354,51 @@ traffic matrix.
 
 Verified against the live `network-sketcher` MCP engine (and a real APIC): both
 modes import with **0 failures** and every L1/L2/L3 diagram artifact generates.
+
+### AI-agent runbook — generate the diagrams without mistakes
+
+> [!IMPORTANT]
+> The diagram build runs in the **Network Sketcher engine** (e.g. the
+> `network-sketcher` MCP), NOT in this converter — the converter only emits the
+> `*.txt` command scripts. The engine names **every** artifact after its master
+> (always `[MASTER]no_data.nsm`), so generating a second mode in a workspace that
+> still holds the first mode's diagrams makes the build **reuse the stale
+> diagrams** (the device table refreshes, but the SVG/HTML do not). Follow the
+> rules below to avoid it.
+
+**Rule 1 — one mode = one clean, dedicated workspace.** Never reuse a workspace
+across modes or runs. The workspace must be under your **home directory** (the
+engine rejects paths outside it).
+
+**Rule 2 — ordered steps, per mode** (`underlay`, then `overlay`):
+1. Use a **fresh empty workspace directory for this mode** (e.g.
+   `~/ns_ws_underlay`, `~/ns_ws_overlay`). If reusing a directory, first delete
+   every prior artifact in it: `[MASTER]*.nsm`, `[L1_DIAGRAM]*`, `[L2_DIAGRAM]*`,
+   `[L3_DIAGRAM]*`, `[L1L2L3_DIAGRAM]*`, `[DEVICE_TABLE]*`, `[AI_Context]*`.
+2. `create_empty_master` → `[MASTER]no_data.nsm`.
+3. `run_commands` with this mode's `*.txt`
+   (`<stem>_aci_underlay(L1Only).txt` or `<stem>_aci_overlay.txt`). Pass the
+   commands as a **newline-delimited single string with the `#` comment lines
+   removed** — NOT a JSON array (an array is parsed as one bad verb and fails).
+   Expect `N OK, 0 FAIL`; if any command FAILs, stop and fix before continuing.
+4. `build_default_outputs` → expect `Summary: 6/6 succeeded.`
+5. **Immediately move/rename** the six artifacts out of the workspace, tagged by
+   mode (e.g. `..._underlay.svg` / `..._overlay.html`), before touching the next
+   mode.
+
+**Rule 3 — verify before trusting the result (do all three):**
+- **Content marker:** the `underlay` L2 SVG must contain a fabric-node name (a
+  spine/leaf/APIC); the `overlay` L2 SVG must contain an overlay name (a VRF
+  gateway `VRF-GW:*`, an EPG `EPG:<BD>-<AP>-<EPG>`, or an `L3Out-*` cloud). A
+  mode whose diagram shows the *other* mode's names was built from a dirty
+  workspace.
+- **Cross-mode diff:** the `underlay` and `overlay` `[L1L2L3_DIAGRAM]` HTML files
+  must **not** be byte-identical.
+- **Freshness:** each artifact's modification time must be newer than the moment
+  you started this mode's build.
+
+If any check fails, the workspace was dirty — redo this mode in a brand-new
+empty workspace (Rule 1).
 
 ## Configuration (`aci_to_ns_config.json`)
 

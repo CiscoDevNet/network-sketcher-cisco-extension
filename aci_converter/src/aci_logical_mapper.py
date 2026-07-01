@@ -6,12 +6,17 @@
 Maps the ACI policy hierarchy onto Network Sketcher constructs:
 
     Tenant (fvTenant)          → NS area (one per tenant)
-    VRF (fvCtx)                → a synthesised per-VRF gateway device + l3_instance
-    Bridge Domain (fvBD)       → an L2 VLAN segment
+    VRF (fvCtx)                → a synthesised per-VRF gateway device 'VRF-GW:<tenant>-<vrf>' + l3_instance
+    Bridge Domain (fvBD)       → an L2 VLAN segment (NOT a device)
     BD subnet (fvSubnet)       → SVI + IP on the VRF gateway (distributed anycast GW)
-    EPG (fvAEPg)               → an NS device, attached to its BD's VLAN
+    EPG (fvAEPg)               → an NS device 'EPG:<BD>-<AP>-<EPG>', attached to its BD's VLAN
     App Profile (fvAp)         → row grouping of its EPGs
     L3Out (l3extOut)           → a gray cloud (external routed network)
+
+Every overlay device name carries a type prefix ('EPG:', 'VRF-GW:', 'SRV_',
+'PC_', 'L3Out-') so a Bridge Domain is never mistaken for a device — a Bridge
+Domain has NO device of its own; it exists only as the shared VLAN segment
+that EPG devices are members of.
 
 Contracts (vzBrCP) are NOT topology — they become the ``[Flow_List]`` sheet,
 built separately by :mod:`flow_list_builder` using the EPG-DN→name map this
@@ -96,10 +101,14 @@ def _tenant_of(dn: str) -> str:
 
 
 def sanitize(name: str) -> str:
-    """Keep NS-safe characters (no quotes / brackets). Collapse whitespace."""
+    """Keep NS-safe characters (no quotes / brackets). Collapse whitespace.
+
+    ':' is allowed so device names can carry a type prefix (``EPG:...``,
+    ``VRF-GW:...``) — verified against the live NS engine to be accepted in
+    device_location / l1_link_bulk / l2_segment_bulk."""
     if name is None:
         return ""
-    keep = [ch for ch in str(name).strip() if ch.isalnum() or ch in " -_.+/"]
+    keep = [ch for ch in str(name).strip() if ch.isalnum() or ch in " -_.:+/"]
     return re.sub(r"\s+", " ", "".join(keep)).strip()
 
 
@@ -205,7 +214,7 @@ def build_logical_model(
         key = (tenant, vrf)
         if key in gateways:
             return gateways[key]
-        gw_name = _unique(f"{tenant}-{vrf}-GW")
+        gw_name = _unique(f"VRF-GW:{tenant}-{vrf}")
         st = sm.map_logical(gw_name, "gateway")
         mappings.append(st)
         model.devices[gw_name] = NSDevice(
@@ -252,18 +261,23 @@ def build_logical_model(
                 epg_name = epg.get("name") or "epg"
                 epg_label = f"{ap_name}/{epg_name}"
 
-                # Resolve the BD first: the device is named '<BD>-<AP>-<EPG>' and
-                # is a MEMBER of the BD's shared L2 segment (= broadcast domain).
-                # The Application Profile is included because an EPG's identity is
-                # tenant/AP/EPG — EPG names repeat across APs (and even within one
-                # BD), so '<BD>-<EPG>' alone would collide and get _2/_3 suffixes.
+                # Resolve the BD first: the device is named 'EPG:<BD>-<AP>-<EPG>'
+                # and is a MEMBER of the BD's shared L2 segment (= broadcast
+                # domain). The 'EPG:' type prefix disambiguates it from a Bridge
+                # Domain — the BD name alone is embedded in the device name (e.g.
+                # 'EPG:Hero_Land-Save_The_Planet-web' is an EPG named "web" in App
+                # Profile "Save_The_Planet", member of BD "Hero_Land"; it is NOT
+                # the BD itself). The Application Profile is included because an
+                # EPG's identity is tenant/AP/EPG — EPG names repeat across APs
+                # (and even within one BD), so '<BD>-<EPG>' alone would collide
+                # and get a meaningless _2/_3 suffix.
                 bd = None
                 bdname = ""
                 for rsbd in idx.children_of(epg, "fvRsBd"):
                     bdname = rsbd.get("tnFvBDName") or bdname
                     bd = bd_by_key.get((tenant, bdname))
                 name_parts = [p for p in (bdname, ap_name, epg_name) if p]
-                dev = _unique(sanitize("-".join(name_parts)) or epg_label)
+                dev = _unique("EPG:" + (sanitize("-".join(name_parts)) or epg_label))
                 epg_name_by_dn[epg.dn] = dev
 
                 provides = sorted({r.get("tnVzBrCPName") for r in idx.children_of(epg, "fvRsProv") if r.get("tnVzBrCPName")})
@@ -403,15 +417,16 @@ def build_logical_model(
         "MODEL — broadcast domain = Bridge Domain: all EPGs that share a BD are "
         "bound to ONE shared L2 segment (the BD's VLAN), matching ACI's default "
         "flooding (broadcast reaches all EPGs in the BD). EPG devices are named "
-        "'<BD>-<EPG>' and are members of that shared segment. NOTE: this assumes "
-        "default flooding; with 'Flood in Encapsulation' enabled, each EPG encap "
-        "is its own flood scope. Per-EPG access-encap VLANs are not modelled as "
-        "separate broadcast domains."
+        "'EPG:<BD>-<AP>-<EPG>' (the 'EPG:' prefix marks it as an EPG, NOT the BD "
+        "itself — the BD is the shared L2 segment, not a device) and are members "
+        "of that shared segment. NOTE: this assumes default flooding; with 'Flood "
+        "in Encapsulation' enabled, each EPG encap is its own flood scope. "
+        "Per-EPG access-encap VLANs are not modelled as separate broadcast domains."
     )
     caveats.append(
-        "INFERRED — VRF gateway devices ('<tenant>-<vrf>-GW') are synthesised: "
-        "one per VRF, standing in for ACI's distributed anycast gateway (which "
-        "actually lives on every deploying leaf)."
+        "INFERRED — VRF gateway devices ('VRF-GW:<tenant>-<vrf>') are "
+        "synthesised: one per VRF, standing in for ACI's distributed anycast "
+        "gateway (which actually lives on every deploying leaf)."
     )
     caveats.append(
         "INFERRED — all L1 links in the overlay (EPG<->gateway, endpoint<->EPG, "
@@ -436,9 +451,9 @@ def build_logical_model(
     )
     caveats.append(
         "INFERRED — endpoint roles: an EPG that PROVIDES a contract is treated as a "
-        "server (endpoints kept individual, named SRV_<tenant>-<epg>_<seq>); an EPG "
+        "server (endpoints kept individual, named SRV_<AP>-<EPG>_<seq>); an EPG "
         "that only CONSUMES is a client (its endpoints collapse into one "
-        "PC_<tenant>-<epg>_<n> segment device, sna-style); otherwise classified by "
+        "PC_<AP>-<EPG>_<n> segment device, sna-style); otherwise classified by "
         "EPG-name keyword. ACI does not label endpoints client/server natively."
     )
 
