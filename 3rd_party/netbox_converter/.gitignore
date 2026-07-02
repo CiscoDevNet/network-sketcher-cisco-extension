@@ -1,0 +1,36 @@
+# Generated output (kept out of version control)
+Output_data/*
+!Output_data/.gitkeep
+
+# Input exports are org-specific; don't commit real NetBox exports
+# (the bundled netbox_export.json is the exception, kept as an example)
+Input_data/*
+!Input_data/.gitkeep
+!Input_data/netbox_export.json
+
+# Generated artifacts if ever written next to the script
+*_netbox.txt
+ns_model_netbox.json
+netbox_inventory.csv
+netbox_report.md
+\[MASTER\]*.nsm
+\[L1_DIAGRAM\]*
+\[L2_DIAGRAM\]*
+\[L3_DIAGRAM\]*
+\[L1L2L3_DIAGRAM\]*
+\[DEVICE_TABLE\]*
+\[AI_Context\]*
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.env
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

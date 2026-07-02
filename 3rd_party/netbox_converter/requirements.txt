@@ -1,0 +1,10 @@
+# netbox_converter dependencies.
+#
+# networkx — used by the placement logic (netbox_layout.py), a faithful port of
+# the offline Network Sketcher tool, for graph centrality metrics and
+# connected-component ("network group") detection.
+networkx>=3.0
+
+# Everything else is the Python standard library (3.10+):
+#   argparse, csv, json, pathlib, re, ssl, sys, urllib,
+#   collections, dataclasses, typing

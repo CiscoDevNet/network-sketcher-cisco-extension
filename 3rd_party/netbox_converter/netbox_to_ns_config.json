@@ -1,0 +1,27 @@
+{
+    "version": {
+        "value": 0.2,
+        "description": "netbox_converter config schema version.",
+        "sample": 0.2
+    },
+    "draw_wan_waypoints": {
+        "value": true,
+        "description": "Draw interfaces that terminate on a circuit / provider network as a link to a gray WAN cloud waypoint (one per far-end name). When false, those interfaces are skipped (reported).",
+        "sample": false
+    },
+    "synthesize_host_stubs": {
+        "value": true,
+        "description": "Give an uncabled port that carries a VLAN / IP a synthetic 'dummy_stub_N' peer (interface 'Dummy <n-1>') so the port -- and its VLAN/IP -- exists in NS. One stub per device; forced light-gray to flag it as inferred. When false, such VLANs/IPs are skipped (reported) instead.",
+        "sample": false
+    },
+    "include_unconnected": {
+        "value": false,
+        "description": "Keep devices that have no cabled L1 link. Default false is offline-faithful (only connected devices are placed). When true, uncabled devices are shown in a dedicated 'unlinked' area (they still carry no ports/L2/L3, since NS has no standalone-port command).",
+        "sample": true
+    },
+    "color_overrides": {
+        "value": {},
+        "description": "Map of NS device name -> [R,G,B] to override a device's role-based Default-cell colour. By default real devices are role-coloured by the shared palette (green network gear / red server / yellow client), observed WAN/provider WayPoints (e.g. Level3 MPLS) are NS's native light blue [220,230,242], and only synthetic dummy_stub_N peers are gray; use this only to recolour specific devices.",
+        "sample": {"dmi01-akron-rtr01": [255, 204, 204]}
+    }
+}
