@@ -310,11 +310,12 @@ Convert a Cisco Modeling Labs lab (topology YAML + any embedded running-configs)
 into a ready-to-run Network Sketcher command script — reconstructing L1/L2/L3,
 entirely from local files (no CML connectivity at conversion time).
 
-<img width="1109" height="337" alt="image" src="https://github.com/user-attachments/assets/def702e3-8b6f-44ae-a961-6faeb8a35142" />
+<img width="1109" height="337" alt="image" src="https://github.com/user-attachments/assets/3fc59bf2-0ec9-43d1-986d-24dd63734c9c" />
 
-<img width="783" height="302" alt="image" src="https://github.com/user-attachments/assets/0211fcd4-42a4-4ad0-9d86-33512530494d" />
+<img width="783" height="302" alt="image" src="https://github.com/user-attachments/assets/114883b4-74b0-4a68-a6e6-264940148568" />
 
-<img width="1227" height="588" alt="image" src="https://github.com/user-attachments/assets/43188e91-bb16-4391-ae0d-9c1cafedf5c6" />
+<img width="1227" height="588" alt="image" src="https://github.com/user-attachments/assets/4044d19d-332b-41d7-a34c-2329ccd34353" />
+
 
 [[L1L2L3_DIAGRAM]AllAreas_no_data_1.html](https://github.com/user-attachments/files/28463950/L1L2L3_DIAGRAM.AllAreas_no_data_1.html)
 
@@ -373,11 +374,12 @@ files. Unlike `sna_converter` (which *infers* office/enterprise sites from
 NetFlow), Cyber Vision already classifies assets into Groups with Device Types,
 so this tool *maps* that structure onto an OT reference architecture.
 
-<img width="2353" height="304" alt="image" src="https://github.com/user-attachments/assets/a62a3e2e-e5b2-47a2-8484-3818b41a433a" />
+<img width="2353" height="304" alt="image" src="https://github.com/user-attachments/assets/1add3423-2e36-44b4-bc80-f0e953253261" />
 
-<img width="2319" height="437" alt="image" src="https://github.com/user-attachments/assets/802a8111-33e6-43a7-85d6-b706c32da982" />
+<img width="2319" height="437" alt="image" src="https://github.com/user-attachments/assets/61fa2a0c-7a26-413c-950a-ff1ec0c8bfd7" />
 
-<img width="2482" height="239" alt="image" src="https://github.com/user-attachments/assets/43ba3f86-a86f-41cb-bd58-0579365d8760" />
+<img width="2482" height="239" alt="image" src="https://github.com/user-attachments/assets/5fe8fb63-9c5a-4b79-afb9-9f527e5100ad" />
+
 
 [cv_sample_1.zip](https://github.com/user-attachments/files/29197721/cv_sample_1.zip)
 
@@ -586,7 +588,8 @@ Network Analytics (SNA / Stealthwatch) NetFlow **Flow Search CSV** and produces
 a Network Sketcher command script and a `[FLOW]` traffic matrix — entirely from a
 local file, with no SNA server connection required.
 
-<img width="1043" height="644" alt="image" src="https://github.com/user-attachments/assets/80d0f50d-1c37-41b5-a921-0f8da23bbb15" />
+<img width="1043" height="644" alt="image" src="https://github.com/user-attachments/assets/d2cb5e45-4eaa-44fb-869d-8527f93b8ea6" />
+
 
 > **Full documentation** (site inference logic, endpoint naming conventions,
 > supported CSV formats, the `Max. bandwidth(Mbps)` formula, `sna_to_ns_config.json`
