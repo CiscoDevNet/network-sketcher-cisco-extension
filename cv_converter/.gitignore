@@ -3,8 +3,11 @@ Output_data/*
 !Output_data/.gitkeep
 
 # Input exports are site-specific; don't commit real CV data
+# (the bundled sample_*.csv files are the exception, kept as examples)
 Input_data/*
 !Input_data/.gitkeep
+!Input_data/sample_networkNodes.csv
+!Input_data/sample_activities.csv
 
 # Generated artifacts if ever written next to the script
 # (brackets escaped so they match literally, not as glob char-classes)

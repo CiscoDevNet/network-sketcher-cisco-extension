@@ -2,6 +2,12 @@
 Output_data/*
 !Output_data/.gitkeep
 
+# Input CSVs are site-specific; don't commit real SNA flow exports
+# (the bundled sample_flows.csv is the exception, kept as an example)
+Input_data/*
+!Input_data/.gitkeep
+!Input_data/sample_flows.csv
+
 # Normalized intermediate files (UI-format inputs)
 **/_normalized_flow.csv
 
