@@ -338,6 +338,12 @@ ENDPOINT_NDEF = {"alpine", "ubuntu", "centos", "tiny-linux", "server", "desktop"
                   "win-desktop", "win-server", "wireless-client"}
 WAYPOINT_NDEF = {"external_connector"}
 
+# NS's native WayPoint colour (light blue), used for an OBSERVED WayPoint: an
+# 'external_connector' is a real node the user placed in the CML lab (it has
+# its own label, like any other node) — it is just a bridge to the host
+# network rather than a simulated device, so it is observed, not inferred.
+_OBSERVED_WAYPOINT = (220, 230, 242)
+
 
 def _pick_area(node: Dict[str, Any]) -> str:
     """Choose an area name from a CML node's tags / label."""
@@ -400,6 +406,7 @@ def assign_areas_and_rows(
         area = _pick_area(n)
         row = _pick_row(n, st)
         is_endpoint = st.stencil_type in {NS_SERVER, NS_PC} or (n.get("node_definition") or "") in ENDPOINT_NDEF
+        is_waypoint_ndef = (n.get("node_definition") or "") in WAYPOINT_NDEF
         devices[label] = NSDevice(
             name=label,
             area=area,
@@ -408,6 +415,7 @@ def assign_areas_and_rows(
             is_endpoint=is_endpoint,
             x=_coerce_coord(n.get("x")),
             y=_coerce_coord(n.get("y")),
+            default_color=_OBSERVED_WAYPOINT if is_waypoint_ndef else None,
         )
     return devices
 

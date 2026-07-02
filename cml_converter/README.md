@@ -53,19 +53,21 @@ python -m cml_converter.src.convert \
 
 ## Device color conventions
 
-The generated `rename attribute_bulk` command writes a coloured cell into the **Default** column of the Network Sketcher Attribute sheet — `\"['DEVICE',[R,G,B]]\"` (WayPoints keep their token: `\"['WayPoint',[R,G,B]]\"`) — so every device is colour-coded by role in the Device Table. The palette and its meaning are **shared across the sna / cv / cml converters**:
+The generated `rename attribute_bulk` command writes a coloured cell into the **Default** column of the Network Sketcher Attribute sheet — `\"['DEVICE',[R,G,B]]\"` (WayPoints keep their token: `\"['WayPoint',[R,G,B]]\"`) — so every device is colour-coded by role in the Device Table. The palette and its meaning are **shared across every converter in this repo**:
 
 | Colour | RGB | Meaning |
 |--------|-----|---------|
 | 🟩 Light green | `[235, 241, 222]` | **Observed network gear** — a real router / L3 switch / switch / firewall / WLC / AP present in the source data |
 | 🟥 Light red | `[255, 204, 204]` | **Server-role endpoint** — server / controller / OT asset / internet service |
 | 🟨 Light yellow | `[255, 255, 204]` | **Client endpoint** — PC / workstation / phone |
-| 🟦 Light blue | `[220, 230, 242]` | **Observed network-device WayPoint** — a WayPoint backed by a real, observed network device (reserved; not emitted today, planned for future use) |
-| ⬜ Light gray | `[200, 200, 200]` | **Inferred / not observed** — devices synthesised by the converter to complete a plausible topology, plus inferred WAN / Internet / cloud **WayPoints** (no real device behind them) |
+| 🟦 Light blue | `[220, 230, 242]` | **Observed WayPoint** — a WayPoint backed by a real source record. Also the fixed colour of the **Stencil Type** attribute column |
+| ⬜ Light gray | `[200, 200, 200]` | **Inferred / not observed** — devices synthesised by the converter to complete a plausible topology (none currently — see below) |
 
-The two WayPoint colours separate **observed** WayPoints (blue, backed by a real network device — future) from **inferred** WayPoints (gray, abstract WAN / Internet / cloud edges).
+The two WayPoint colours separate **observed** WayPoints (blue, backed by a real node in the lab) from **inferred** WayPoints (gray, invented by the converter with no real node behind them).
 
-**In cml_converter:** every device in a CML lab is observed, so network gear (Router / L3Switch / Switch / Firewall / WLC / AP) is **green**, servers are **red**, and PC / Phone endpoints are **yellow**. Gray is reserved for the WAN / Internet / cloud WayPoints that have no real device behind them.
+Two further fixed cell colours appear in every device row (set by the shared `ns_command_builder`, not role-based): the **Model** column is pink `[255, 183, 219]` and the **OS** column is light blue `[200, 230, 255]`.
+
+**In cml_converter:** every device in a CML lab is observed — including an `external_connector` node (the bridge to the host network), which is a real node the user placed in the lab, so it renders **light blue**, not gray. Network gear (Router / L3Switch / Switch / Firewall / WLC / AP) is **green**, servers are **red**, and PC / Phone endpoints are **yellow**. Gray is reserved for devices the converter itself would invent — cml_converter has no such case today, since every device comes from a real CML lab node.
 
 ## Running the output in Network Sketcher
 
@@ -89,18 +91,6 @@ running_configs/
 └── border1.txt
 ```
 
-## How it works
-
-```
-CML YAML
-   └─► topology_mapper.py  ─► NSModel (dataclass)
-         ├─ stencil_mapper.py  (node_definition → NS Stencil Type)
-         └─ config_parser.py   (running-config → VLAN/SVI/IP data)
-
-NSModel
-   └─► ns_command_builder.py  ─► Phase 1-6 NS CLI commands
-```
-
 ## Supported CML YAML formats
 
 - CML UI export (`Lab → Export → YAML`) — `lab: {nodes: [...], links: [...]}`
@@ -114,13 +104,7 @@ cml_converter/
 ├── README.md            (this file)
 ├── requirements.txt
 ├── .gitignore
-└── src/
-    ├── __init__.py
-    ├── convert.py         ← entry point
-    ├── topology_mapper.py
-    ├── stencil_mapper.py
-    ├── config_parser.py
-    └── ns_command_builder.py
+└── src/                 (entry point: convert.py)
 ```
 
 ## Cisco Technologies
