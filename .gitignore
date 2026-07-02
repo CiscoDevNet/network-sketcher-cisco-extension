@@ -8,6 +8,7 @@ __pycache__/
 .venv/
 venv/
 
-# Generated tool outputs (keep the directory via .gitkeep)
-*/Output_data/*
-!*/Output_data/.gitkeep
+# Generated tool outputs (keep the directory via .gitkeep).
+# '**/' also covers nested converters such as 3rd_party/netbox_converter/.
+**/Output_data/*
+!**/Output_data/.gitkeep

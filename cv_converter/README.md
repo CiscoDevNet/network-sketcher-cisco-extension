@@ -10,8 +10,8 @@ Types** and **Industrial Impact**, so this tool *maps* that structure onto an OT
 reference architecture rather than guessing it.
 
 > Status: **Phase 1–3 implemented and verified** against the live
-> `network-sketcher` MCP engine (commands imported with 0 failures; all diagram
-> artifacts generated).
+> `network-sketcher` MCP engine — commands import cleanly and all diagram
+> artifacts generate correctly.
 
 ---
 
@@ -145,7 +145,7 @@ plant-floor cell/area zones.
 
 ## Device color conventions
 
-The generated `rename attribute_bulk` command writes a coloured cell into the **Default** column of the Network Sketcher Attribute sheet — `\"['DEVICE',[R,G,B]]\"` (WayPoints keep their token: `\"['WayPoint',[R,G,B]]\"`) — so every device is colour-coded by role in the Device Table. The palette and its meaning are **shared across the sna / cv / cml converters**:
+The generated `rename attribute_bulk` command writes a coloured cell into the **Default** column of the Network Sketcher Attribute sheet — `\"['DEVICE',[R,G,B]]\"` (WayPoints keep their token: `\"['WayPoint',[R,G,B]]\"`) — so every device is colour-coded by role in the Device Table. The palette and its meaning are **shared across every converter in this repo**:
 
 | Colour | RGB | Meaning |
 |--------|-----|---------|

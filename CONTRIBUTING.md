@@ -55,11 +55,19 @@ suite.
 
 ## Adding a New Tool
 
-Each converter is self-contained. Place a new tool in its own sub-directory (e.g. `ise_converter/`) with:
+Each converter is self-contained. Place a new tool in its own sub-directory (e.g. `ise_converter/` at the repo root
+for a Cisco platform, or `3rd_party/ise_converter/` for a non-Cisco one) with:
 
 - `README.md` — purpose, usage, example
 - `requirements.txt` — minimal dependencies
 - `src/` — Python source
+
+**Start from [`template_converter/`](/template_converter/)** instead of building from scratch — it has a copy-paste
+-ready `src/` scaffold and a [`GUIDE.md`](/template_converter/GUIDE.md) documenting the architecture every converter
+in this repo shares (which files are copy-verbatim vs. platform-specific, the credential/security conventions, the
+`Input_data`/`Output_data`/`.gitignore` convention, the README convention, and a pre-push checklist). Following it
+avoids the class of mistakes — missing `.gitignore` protection, sample-filename mismatches, inconsistent
+documentation — found and fixed across the existing converters.
 
 Add a row to the tools table in the root [`README.md`](/README.md), and add the Cisco copyright / SPDX header (see
 [Code Style](#code-style)) to every new `.py` file.

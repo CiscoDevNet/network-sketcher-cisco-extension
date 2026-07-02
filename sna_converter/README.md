@@ -109,18 +109,7 @@ The input format is auto-detected from the header row:
   `Duration` (`36min 38s`). These are normalized automatically (byte
   suffixes K/M/G/T, duration `d/h/min/s`, `port/proto` strings).
 
-## How it works
-
-```
-SNA Flow CSV (API or UI format)
-   └─► normalize_csv()        detect format, convert UI -> required columns
-         └─► inside detection  RFC1918 + auto/declared public ranges
-               └─► /24 aggregation (segments) -> /16 regions
-                     └─► traffic-graph grouping -> sites (+ DC / spur split)
-                           └─► server detection  (SNA orientation: peer = server)
-                                 └─► command builder -> gen_master_commands.txt
-                                 └─► flow matrix     -> gen_flow_list.csv
-```
+## Site grouping
 
 Site grouping is driven by the settings in `sna_to_ns_config.json`. Highlights:
 
@@ -190,7 +179,7 @@ Use `name_map` in `sna_to_ns_config.json` to rename hub sites (and thus their co
 
 ## Device color conventions
 
-The generated `rename attribute_bulk` command writes a coloured cell into the **Default** column of the Network Sketcher Attribute sheet — `\"['DEVICE',[R,G,B]]\"` (WayPoints keep their token: `\"['WayPoint',[R,G,B]]\"`) — so every device is colour-coded by role in the Device Table. The palette and its meaning are **shared across the sna / cv / cml converters**:
+The generated `rename attribute_bulk` command writes a coloured cell into the **Default** column of the Network Sketcher Attribute sheet — `\"['DEVICE',[R,G,B]]\"` (WayPoints keep their token: `\"['WayPoint',[R,G,B]]\"`) — so every device is colour-coded by role in the Device Table. The palette and its meaning are **shared across every converter in this repo**:
 
 | Colour | RGB | Meaning |
 |--------|-----|---------|

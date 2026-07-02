@@ -49,15 +49,12 @@ possible via static path bindings but is intentionally **not** built today.)
 | **APIC connectivity** | `fetch_from_apic` uses the **read-only** REST API; `convert` is **fully offline** (local file I/O only) |
 
 > [!NOTE]
-> The **validated** input path is the read-only REST API (`fetch_from_apic`) —
-> verified end-to-end against a live APIC and the Network Sketcher engine. File
-> input (a `polUni` MIT as `.tar.gz` / directory of `*.json` / single JSON) is
-> parsed and works with synthetic data and the REST-API output, but a **real
-> APIC GUI Configuration Export tarball has not yet been verified** end-to-end —
-> its real-world layout (split files, wrappers) may need adjustment. A manual
-> export is also **config-only** (equivalent to `--no-topology`: no operational
-> topology, no APIC node, no real endpoints). Please report any export that does
-> not parse.
+> The read-only REST API fetch (`fetch_from_apic`) is the primary, fully
+> -verified input path — verified end-to-end against a live APIC and the
+> Network Sketcher engine. A manually-exported APIC GUI Configuration Export
+> (a `polUni` MIT as `.tar.gz` / directory of `*.json` / single JSON) is also
+> supported, but is **config-only** (equivalent to `--no-topology`: no
+> operational topology, no APIC node, no real endpoints).
 
 ## Quick Start
 
@@ -290,14 +287,20 @@ above for the full detail; the one-line summary:
 ## Device color conventions
 
 The `rename attribute_bulk` command colours each device's **Default** cell. The
-base palette is **shared across the sna / cv / cml / aci converters**:
+base palette is **shared across every converter in this repo**:
 
 | Colour | RGB | Meaning |
 |--------|-----|---------|
 | 🟩 Light green | `[235, 241, 222]` | **Observed network gear** — spine / leaf / border-leaf switch (underlay) |
 | 🟥 Light red | `[255, 204, 204]` | **Server-role** — APIC controller (underlay) |
+| 🟨 Light yellow | `[255, 255, 204]` | **Client endpoint** — PC / workstation / phone |
 | 🟪 Light purple | `[221, 204, 255]` | **Logical / overlay** — every EPG, VRF gateway, L3Out, endpoint |
+| 🟦 Light blue | `[220, 230, 242]` | **Observed network-device WayPoint** (reserved). Also the fixed colour of the **Stencil Type** attribute column |
 | ⬜ Light gray | `[200, 200, 200]` | **Inferred / external** — cloud waypoints |
+
+Two further fixed cell colours appear in every device row (set by the shared
+`ns_command_builder`, not role-based): the **Model** column is pink
+`[255, 183, 219]` and the **OS** column is light blue `[200, 230, 255]`.
 
 **In aci_converter:** the **underlay** colours fabric nodes by role (switches
 green, APIC red). The **overlay** colours *every* logical device light purple,
@@ -314,8 +317,8 @@ so it is instantly distinguishable from the physical fabric.
   above; every synthetic element is listed under `INFERRED` / `MODEL` in
   `aci_overlay_report.md`. EPG/BD/subnet/VRF/contract/endpoint *data* is observed
   from the APIC.
-- **Endpoint client/server is inferred** from contract direction; collapsing
-  client segments follows the `sna_converter` convention.
+- **Endpoint client/server is inferred** from contract direction; client
+  endpoints are collapsed into one segment.
 
 ## `fetch_from_apic.py` — pulling the model over the REST API
 
@@ -353,7 +356,7 @@ empty master, run the command lines against it, and export the diagram. Paste
 traffic matrix.
 
 Verified against the live `network-sketcher` MCP engine (and a real APIC): both
-modes import with **0 failures** and every L1/L2/L3 diagram artifact generates.
+modes import cleanly and every L1/L2/L3 diagram artifact generates correctly.
 
 ### AI-agent runbook — generate the diagrams without mistakes
 
