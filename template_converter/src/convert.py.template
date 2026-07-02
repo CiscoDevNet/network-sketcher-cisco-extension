@@ -1,0 +1,157 @@
+# Copyright 2026 Cisco Systems, Inc. and its affiliates
+# SPDX-License-Identifier: Apache-2.0
+
+"""convert.py — PLATFORM export -> Network Sketcher command converter.
+
+TEMPLATE FILE — rename to ``convert.py``, update the module docstring below
+to describe your real platform, and fill in the TODOs. This single-mode
+shape (one script, one command output) is the right default for most new
+converters. If your platform deliberately separates physical/underlay from
+logical/overlay policy (like aci_converter/catc_converter/nd_converter do),
+copy their ``--mode`` argparse pattern and their two-mapper split instead —
+see GUIDE.md "The canonical architecture".
+
+Reads a PLATFORM export (the combined JSON written by
+``fetch_from_platform.py``, or a hand-saved dump) and emits a ready-to-run
+Network Sketcher command script.
+
+Usage (run as a module from the repository root, or from ``3rd_party/`` if
+this is a third-party/community converter)::
+
+    python -m PLATFORM_converter.src.convert \\
+        --input  PLATFORM_converter/Input_data/sample_PLATFORM_export.json \\
+        [--out    PLATFORM_converter/Output_data/ns_commands.txt] \\
+        [--config PLATFORM_converter/PLATFORM_to_ns_config.json]
+
+Outputs (written to the same directory as ``--out``):
+
+    <stem>_PLATFORM.txt       the NS command script (main deliverable)
+    ns_model_PLATFORM.json    the intermediate NSModel (debug)
+    PLATFORM_inventory.csv    device -> stencil mapping (audit)
+    PLATFORM_report.md        counts + accuracy caveats
+
+No live PLATFORM connection is needed at conversion time — all input is
+local (see GUIDE.md "Input_data/Output_data/.gitignore convention" for how
+Input_data/Output_data are meant to be protected).
+"""
+from __future__ import annotations
+
+import argparse
+import csv
+import json
+import pathlib
+import sys
+from typing import Any, Dict, List, Optional
+
+# Windows consoles default to cp1252 and choke on non-ASCII; force UTF-8 so
+# progress output (and any non-ASCII device names) print cleanly everywhere.
+try:
+    sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
+    sys.stderr.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
+except (AttributeError, ValueError):
+    pass
+
+from .platform_reader import load_export
+from .platform_mapper import build_model
+from .platform_stencil_mapper import to_csv_rows
+from .ns_command_builder import build_command_script
+from .ns_model import model_to_dict
+
+
+def _load_config(path: Optional[pathlib.Path]) -> Dict[str, Any]:
+    """Read PLATFORM_to_ns_config.json; only each key's 'value' is used."""
+    if not path or not path.is_file():
+        return {}
+    try:
+        with path.open(encoding="utf-8-sig") as fh:
+            raw = json.load(fh)
+    except (OSError, json.JSONDecodeError) as exc:
+        print(f"[WARN] could not read config {path}: {exc}", file=sys.stderr)
+        return {}
+    out: Dict[str, Any] = {}
+    for key, blob in raw.items():
+        if isinstance(blob, dict) and "value" in blob:
+            out[key] = blob["value"]
+        else:
+            out[key] = blob
+    return out
+
+
+def _write_csv(path: pathlib.Path, rows: List[List[str]]) -> None:
+    with path.open("w", newline="", encoding="utf-8") as fh:
+        csv.writer(fh).writerows(rows)
+
+
+def _write_report(path: pathlib.Path, report, n_commands: int) -> None:
+    """TODO: adjust the fields read from `report` to match your MapperReport."""
+    lines = [
+        "# PLATFORM -> Network Sketcher — Conversion Report\n",
+        "## Counts\n",
+        f"- **devices**: {report.devices}",
+        f"- **l1_links**: {report.l1_links}",
+        f"- **NS commands emitted**: {n_commands}",
+        "",
+        "## Notes / accuracy caveats\n",
+        # TODO: add real caveats here — e.g. what's observed vs. synthesised.
+        # This section is what a USER reads to know how much to trust the
+        # diagram; see GUIDE.md's README convention for the same principle
+        # applied to the converter's own README.md.
+    ]
+    for note in report.notes:
+        lines.append(f"- {note}")
+    lines.append("")
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def main(argv: Optional[list] = None) -> int:
+    parser = argparse.ArgumentParser(
+        description="Convert a PLATFORM export into a Network Sketcher command script.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=__doc__,
+    )
+    parser.add_argument("--input", "-i", required=True, metavar="EXPORT",
+                        help="PLATFORM export JSON (from fetch_from_platform.py).")
+    parser.add_argument("--out", "-o", default="ns_commands.txt", metavar="OUTPUT_FILE",
+                        help="Base output path; side-outputs go to its directory. "
+                             "Default: ns_commands.txt")
+    parser.add_argument("--config", "-c", default=None, metavar="CONFIG_JSON",
+                        help="Path to PLATFORM_to_ns_config.json (optional).")
+    args = parser.parse_args(argv)
+
+    input_path = pathlib.Path(args.input).resolve()
+    out_path = pathlib.Path(args.out).resolve()
+    out_dir = out_path.parent
+    out_dir.mkdir(parents=True, exist_ok=True)
+    stem = out_path.stem or "ns_commands"
+    cfg = _load_config(pathlib.Path(args.config).resolve() if args.config else None)
+
+    print(f"[1/2] Loading PLATFORM export: {input_path}")
+    try:
+        data = load_export(str(input_path))
+    except (FileNotFoundError, ValueError) as exc:
+        print(f"[ERROR] {exc}", file=sys.stderr)
+        return 1
+    print(f"        {data.summary()}")
+
+    print("[2/2] Building NSModel and generating commands ...")
+    model, mappings, report = build_model(data, cfg)
+    script = build_command_script(model)
+    n_commands = sum(script.counts.values())
+
+    script_name = f"{stem}_PLATFORM.txt"
+    (out_dir / script_name).write_text(script.text(), encoding="utf-8")
+    (out_dir / "ns_model_PLATFORM.json").write_text(
+        json.dumps(model_to_dict(model), indent=2, ensure_ascii=False), encoding="utf-8")
+    _write_csv(out_dir / "PLATFORM_inventory.csv", to_csv_rows(mappings))
+    _write_report(out_dir / "PLATFORM_report.md", report, n_commands)
+
+    print(f"  devices={report.devices} l1_links={report.l1_links} commands={n_commands}")
+    for note in report.notes:
+        print(f"  [note] {note}")
+    print(f"  -> {script_name}, ns_model_PLATFORM.json, PLATFORM_inventory.csv, PLATFORM_report.md")
+    print("\n[Done] All outputs written to:", out_dir)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

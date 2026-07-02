@@ -1,0 +1,17 @@
+{
+    "version": {
+        "value": 0.1,
+        "description": "PLATFORM_converter config schema version.",
+        "sample": 0.1
+    },
+    "device_naming": {
+        "value": "name",
+        "description": "TODO: describe the device-name source options your mapper supports, e.g. 'name' | 'name_ip' | 'ip' | 'serial'.",
+        "sample": "name_ip"
+    },
+    "color_overrides": {
+        "value": {},
+        "description": "Map of NS device name -> [R,G,B] to override the role-based Default-cell colour for specific devices. Keep this key in every converter's config for consistency.",
+        "sample": {"example-device-01": [255, 204, 204]}
+    }
+}

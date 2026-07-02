@@ -1,0 +1,157 @@
+# Copyright 2026 Cisco Systems, Inc. and its affiliates
+# SPDX-License-Identifier: Apache-2.0
+
+"""Map a PLATFORM device (role / type / whatever your platform calls it) → NS
+Stencil Type + Model + OS string.
+
+TEMPLATE FILE — rename to ``<platform>_stencil_mapper.py`` and fill in the
+TODOs. Returns a ``StencilMapping`` per device that the shared
+``ns_command_builder`` serialises into ``rename attribute_bulk`` rows (and
+your ``<platform>_inventory.csv`` for audit).
+
+The ``NS_*`` constants and the ``StencilMapping`` dataclass below are FIXED —
+copy them verbatim, do not invent new stencil types or add new fields. Only
+``ROLE_TABLE`` (or equivalent mapping logic) and the map_* functions are
+platform-specific.
+
+Confidence convention used across every converter in this repo (keep it):
+- 1.00 : exact match from a real platform field (an explicit role/type enum)
+- 0.85 : inferred from a name/keyword heuristic
+- 0.60 : synthesised logical construct (a gateway/segment your mapper builds,
+         not a literal platform object)
+- 0.40 : pure default — flag for human review in the report
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import List
+
+
+# Allowed NS Stencil Type values (RULE 16). Do not add to this list — these
+# are the only stencil types the Network Sketcher engine accepts.
+NS_ROUTER = "Router"
+NS_L3SWITCH = "L3Switch"
+NS_SWITCH = "Switch"
+NS_FIREWALL = "Firewall"
+NS_WLC = "WLC"
+NS_AP = "AP"
+NS_SERVER = "Server"
+NS_CLOUD = "Cloud"
+NS_PHONE = "Phone"
+NS_PC = "PC"
+
+
+@dataclass
+class StencilMapping:
+    label: str
+    node_definition: str        # the source role / construct token
+    image_definition: str       # serial / extra context (audit only)
+    stencil_type: str
+    model: str
+    os: str
+    confidence: float
+    reason: str
+    tags: List[str]
+
+
+# TODO: replace with your platform's real role/type -> (NS_*, model, os) map.
+# Keys should be normalised (lower-case, no spaces/hyphens) the same way
+# ``normalise_role`` below does, so lookups are forgiving of raw formatting
+# differences in the source data.
+ROLE_TABLE = {
+    # "core":   (NS_L3SWITCH, "PLATFORM Core Switch", "PLATFORM-OS 1.0"),
+    # "access": (NS_SWITCH,   "PLATFORM Access Switch", "PLATFORM-OS 1.0"),
+    # "router": (NS_ROUTER,   "PLATFORM Router", "PLATFORM-OS 1.0"),
+}
+
+
+def normalise_role(role: str) -> str:
+    """Canonicalise a raw role string ('Core Switch' -> 'coreswitch')."""
+    return "".join((role or "").lower().split()).replace("-", "").replace("_", "")
+
+
+def map_device(
+    name: str,
+    role: str,
+    serial: str = "",
+    model_hint: str = "",
+    os_hint: str = "",
+    inferred: bool = False,
+) -> StencilMapping:
+    """Map one real platform device to a stencil.
+
+    TODO: adapt this to your platform's actual role/type field(s). Keep the
+    confidence convention above (1.00 exact / 0.85 inferred / 0.40 default).
+    """
+    role_key = normalise_role(role)
+    if role_key in ROLE_TABLE:
+        stencil, model, os_str = ROLE_TABLE[role_key]
+        if model_hint:
+            model = f"{model} [{model_hint}]"
+        if os_hint:
+            os_str = f"{os_str} {os_hint}"
+        return StencilMapping(
+            label=name,
+            node_definition=role_key,
+            image_definition=serial,
+            stencil_type=stencil,
+            model=model,
+            os=os_str,
+            confidence=0.85 if inferred else 1.0,
+            reason=(f"role inferred from name -> '{role_key}'" if inferred
+                    else f"platform role='{role}'"),
+            tags=[role_key],
+        )
+    return StencilMapping(
+        label=name,
+        node_definition=role or "",
+        image_definition=serial,
+        stencil_type=NS_L3SWITCH,  # TODO: pick a sensible platform-wide default
+        model=f"PLATFORM device ({role or 'unspecified'})"
+              + (f" [{model_hint}]" if model_hint else ""),
+        os=(os_hint or "unknown"),
+        confidence=0.40,
+        reason=f"unknown role '{role}' — REVIEW",
+        tags=[role or "unknown"],
+    )
+
+
+def map_logical(
+    name: str,
+    kind: str,
+    model: str = "",
+    os_str: str = "",
+) -> StencilMapping:
+    """Map a synthesised logical construct (a gateway, segment, external
+    hand-off, etc. that your mapper builds rather than reads verbatim) to a
+    stencil. Delete this function if your platform has no such constructs
+    (a purely physical inventory, e.g.) — see GUIDE.md.
+    """
+    table = {
+        # "gateway":  (NS_L3SWITCH, model or "Logical gateway", os_str or ""),
+        # "segment":  (NS_PC,       model or "Logical segment", os_str or ""),
+        "external": (NS_CLOUD, model or "External / hand-off", os_str or ""),
+    }
+    stencil, mdl, os_v = table.get(kind, (NS_PC, model or kind, os_str))
+    return StencilMapping(
+        label=name,
+        node_definition=kind,
+        image_definition="",
+        stencil_type=stencil,
+        model=mdl,
+        os=os_v,
+        confidence=0.60,
+        reason=f"logical construct '{kind}'",
+        tags=[kind],
+    )
+
+
+def to_csv_rows(mappings: List[StencilMapping]) -> List[List[str]]:
+    rows = [["name", "role/kind", "serial/context", "stencil_type",
+             "model", "os", "confidence", "reason", "tags"]]
+    for m in mappings:
+        rows.append([
+            m.label, m.node_definition, m.image_definition, m.stencil_type,
+            m.model, m.os, f"{m.confidence:.2f}", m.reason, ",".join(m.tags)
+        ])
+    return rows

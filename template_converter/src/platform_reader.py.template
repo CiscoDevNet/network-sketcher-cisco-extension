@@ -1,0 +1,72 @@
+# Copyright 2026 Cisco Systems, Inc. and its affiliates
+# SPDX-License-Identifier: Apache-2.0
+
+"""platform_reader.py — load a PLATFORM export JSON and index it for the mapper.
+
+TEMPLATE FILE — rename to ``<platform>_reader.py`` and fill in the TODOs.
+
+This is a thin data-access layer over the combined JSON your
+``fetch_from_platform.py`` writes (or a hand-saved API dump). It should
+perform NO topology logic — only parse the raw JSON, normalise identifiers,
+and build lookup indexes (``xxx_by_id``, ``yyy_by_device``, ...) that your
+mapper walks. Keep all "what does this data MEAN for the diagram" logic out
+of this file; that belongs in ``platform_mapper.py``.
+"""
+from __future__ import annotations
+
+import json
+from collections import defaultdict
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Optional
+
+
+@dataclass
+class PlatformData:
+    """TODO: replace these fields with your platform's actual object lists
+    (devices, interfaces, links/cables, IP addresses, VLANs, VRFs, ...).
+    Keep raw dicts here (as read from JSON) — typed conversion happens in the
+    mapper, not here."""
+    meta: Dict[str, Any]
+    devices: List[dict] = field(default_factory=list)
+    interfaces: List[dict] = field(default_factory=list)
+    links: List[dict] = field(default_factory=list)
+
+    # Indexes (populated in __post_init__). Add whatever your mapper needs —
+    # e.g. "interfaces_by_device", "links_by_device" — following this pattern.
+    device_by_id: Dict[Any, dict] = field(default_factory=dict)
+    interfaces_by_device: Dict[Any, List[dict]] = field(default_factory=lambda: defaultdict(list))
+
+    def __post_init__(self) -> None:
+        # TODO: adjust the id field name(s) to match your platform's schema.
+        self.device_by_id = {d.get("id"): d for d in self.devices}
+        for itf in self.interfaces:
+            dev_id = itf.get("device_id")
+            if dev_id is not None:
+                self.interfaces_by_device[dev_id].append(itf)
+
+    def summary(self) -> Dict[str, int]:
+        return {
+            "devices": len(self.devices),
+            "interfaces": len(self.interfaces),
+            "links": len(self.links),
+        }
+
+
+def load_export(path: str) -> PlatformData:
+    """Load the combined JSON written by fetch_from_platform.py.
+
+    TODO: if your fetch script's JSON shape differs from a flat dict of
+    lists, adapt the parsing below. Keep supporting a plain JSON file as the
+    baseline; supporting a directory-of-files or .tar.gz input (like
+    aci/catc/nd_converter do) is optional — only add it if your platform's
+    real-world exports commonly come that way.
+    """
+    with open(path, encoding="utf-8-sig") as fh:
+        raw = json.load(fh)
+
+    return PlatformData(
+        meta=raw.get("_meta", {}),
+        devices=raw.get("devices", []),
+        interfaces=raw.get("interfaces", []),
+        links=raw.get("links", []),
+    )

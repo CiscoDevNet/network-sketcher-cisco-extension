@@ -1,0 +1,46 @@
+# TEMPLATE FILE — copy into your new converter's folder and replace every
+# PLATFORM placeholder with your real sample filename(s). This exact
+# Input_data/Output_data pattern is required for every converter in this
+# repo — see GUIDE.md "Input_data/Output_data/.gitignore convention".
+
+# Generated output (kept out of version control)
+Output_data/*
+!Output_data/.gitkeep
+
+# Input exports are site/org-specific; don't commit real PLATFORM data.
+# List EVERY bundled sample file explicitly as an exception — do not
+# whitelist a whole pattern. If your converter needs more than one sample
+# file (e.g. cv_converter needs a nodes CSV + an activities CSV), add one
+# line per file.
+Input_data/*
+!Input_data/.gitkeep
+!Input_data/sample_PLATFORM_export.json
+
+# Generated artifacts if ever written next to the script
+ns_commands*.txt
+ns_model_*.json
+gen_*.csv
+PLATFORM_inventory.csv
+PLATFORM_report.md
+PLATFORM_export.json
+\[MASTER\]*.nsm
+\[L1_DIAGRAM\]*
+\[L2_DIAGRAM\]*
+\[L3_DIAGRAM\]*
+\[L1L2L3_DIAGRAM\]*
+\[DEVICE_TABLE\]*
+\[AI_Context\]*
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.env
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

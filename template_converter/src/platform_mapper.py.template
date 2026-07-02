@@ -1,0 +1,128 @@
+# Copyright 2026 Cisco Systems, Inc. and its affiliates
+# SPDX-License-Identifier: Apache-2.0
+
+"""platform_mapper.py — build an NSModel from indexed PLATFORM data.
+
+TEMPLATE FILE — rename to ``<platform>_mapper.py`` (or split into
+``<platform>_physical_mapper.py`` / ``<platform>_logical_mapper.py`` if your
+platform needs the dual underlay/overlay split — see GUIDE.md) and fill in
+the TODOs.
+
+This is where the real platform-specific logic lives: turning ``PlatformData``
+(raw indexed objects) into the converter-agnostic ``NSModel`` that
+``ns_command_builder`` serialises. Everything downstream of this file
+(``ns_model.py``, ``ns_command_builder.py``) is shared/copy-verbatim — this
+file is the one that actually knows what your platform's objects mean.
+
+Colour convention (do not deviate without a documented reason — see
+GUIDE.md "Device colour convention"):
+  * Real, observed devices get NO ``default_color`` override — let
+    ``ns_command_builder`` apply its role-based colour (green network gear /
+    red server / yellow client) from the stencil type.
+  * A device that is SYNTHESISED (it doesn't exist as a literal platform
+    object — e.g. a gateway/segment/stub your mapper invents to represent
+    policy) gets ``default_color=GRAY`` to flag it as inferred.
+  * An external/WAN cloud that IS backed by a real platform record gets NS's
+    native WayPoint light-blue; one that is purely synthesised also uses GRAY.
+"""
+from __future__ import annotations
+
+from collections import defaultdict
+from dataclasses import dataclass, field
+from typing import Dict, List, Tuple
+
+from . import platform_stencil_mapper as sten
+from .platform_reader import PlatformData
+from .ns_model import (
+    NSDevice, NSIPAssignment, NSL1Link, NSL2Segment, NSModel,
+    NSPortChannel, NSVirtualPort, build_area_layout, normalise_port_name,
+)
+
+# Shared-palette light gray: "inferred / external / not observed reality".
+GRAY = (200, 200, 200)
+
+# RULE 0 vertical tier per stencil type — TODO adjust if your platform's
+# hierarchy differs (e.g. no WLC/AP tier). Keep the WAN cloud at 0 and
+# endpoints at the bottom; everything else is a judgment call for your
+# platform's typical topology shape.
+_TIER = {
+    sten.NS_CLOUD: 0,
+    sten.NS_ROUTER: 1, sten.NS_FIREWALL: 1,
+    sten.NS_WLC: 2,
+    sten.NS_L3SWITCH: 3,
+    sten.NS_SWITCH: 4, sten.NS_AP: 4,
+    sten.NS_SERVER: 5, sten.NS_PC: 5, sten.NS_PHONE: 5,
+}
+
+
+@dataclass
+class MapperReport:
+    """Counts + human-readable notes for the report.md the entry point writes.
+    TODO: add whatever counters your platform's Output report should show."""
+    devices: int = 0
+    l1_links: int = 0
+    ip_assignments: int = 0
+    port_channels: int = 0
+    svis: int = 0
+    l2_access: int = 0
+    l2_trunk: int = 0
+    vrf_renames: int = 0
+    notes: List[str] = field(default_factory=list)
+
+
+def build_model(data: PlatformData, cfg: Dict) -> Tuple[NSModel, List["sten.StencilMapping"], MapperReport]:
+    """TODO: this is the real work. Walk ``data`` and populate an ``NSModel``:
+
+      1. For each real device: create an ``NSDevice`` (name, area, row from
+         _TIER, stencil from ``platform_stencil_mapper.map_device``,
+         is_endpoint). Append to ``model.devices``.
+      2. For each link/cable: create an ``NSL1Link`` (normalise port names
+         with ``normalise_port_name``). Append to ``model.l1_links``.
+      3. For each VLAN/IP/VRF/port-channel your platform models: create the
+         matching ``NS*`` dataclass instance from ``ns_model.py`` and append
+         to the matching ``NSModel`` list.
+      4. Call ``build_area_layout(model.devices, model.l1_links, layout="tier")``
+         and assign the result to ``model.areas`` / ``model.area_to_devices``.
+      5. Track counts/notes in a ``MapperReport`` as you go — this becomes
+         your ``<platform>_report.md``'s "Counts" / "Accuracy caveats"
+         sections (see GUIDE.md's README convention for why that split
+         matters to a user).
+
+    Return ``(model, mappings, report)`` where ``mappings`` is the list of
+    every ``StencilMapping`` you produced (for ``<platform>_inventory.csv``).
+    """
+    model = NSModel()
+    mappings: List["sten.StencilMapping"] = []
+    report = MapperReport()
+
+    devices_by_name: Dict[str, NSDevice] = {}
+    for raw_dev in data.devices:
+        name = raw_dev.get("name") or f"device-{raw_dev.get('id')}"
+        role = raw_dev.get("role", "")
+        mapping = sten.map_device(name, role, serial=raw_dev.get("serial", ""))
+        mappings.append(mapping)
+        area = "default"  # TODO: derive a real area (site/fabric/tenant) from raw_dev
+        dev = NSDevice(
+            name=name, area=area, row=_TIER.get(mapping.stencil_type, 5),
+            stencil=mapping, is_endpoint=False,
+        )
+        model.devices[name] = dev
+        devices_by_name[name] = dev
+        report.devices += 1
+
+    for link in data.links:
+        a_name = link.get("a_device")
+        b_name = link.get("b_device")
+        if a_name not in devices_by_name or b_name not in devices_by_name:
+            continue
+        model.l1_links.append(NSL1Link(
+            a_device=a_name, a_port=normalise_port_name(link.get("a_port", "")),
+            b_device=b_name, b_port=normalise_port_name(link.get("b_port", "")),
+        ))
+        report.l1_links += 1
+
+    model.areas, model.area_to_devices = build_area_layout(
+        model.devices, model.l1_links, layout="tier",
+    )
+
+    return model, mappings, report

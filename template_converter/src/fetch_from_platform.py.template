@@ -1,0 +1,175 @@
+# Copyright 2026 Cisco Systems, Inc. and its affiliates
+# SPDX-License-Identifier: Apache-2.0
+
+"""fetch_from_platform.py — pull a PLATFORM model over its read-only REST API.
+
+TEMPLATE FILE — rename to ``fetch_from_<platform>.py`` and fill in the TODOs.
+DELETE this file entirely if your platform has no API and only supports a
+file export (like cml_converter/cv_converter/sna_converter) — see GUIDE.md
+"The canonical architecture".
+
+Companion to ``convert.py``. The converter reads local files, but in a lab
+it's convenient to grab the model straight from a reachable PLATFORM
+controller/API and feed the result directly into the converter::
+
+    python -m PLATFORM_converter.src.fetch_from_platform \\
+        --host platform.example.com --user admin \\
+        --out PLATFORM_converter/Input_data/platform_export.json
+    # password via --password or the PLATFORM_PASSWORD env var
+
+    python -m PLATFORM_converter.src.convert \\
+        -i PLATFORM_converter/Input_data/platform_export.json \\
+        -o PLATFORM_converter/Output_data/ns_commands.txt
+
+SECURITY CONVENTIONS — every fetch script in this repo follows these; keep
+them (see GUIDE.md "Credential & security conventions" for why):
+  * Credentials come from a CLI arg OR an environment variable, NEVER
+    hardcoded. The CLI arg wins if both are given.
+  * Standard library only (``urllib`` + ``ssl``) — no `requests` or any
+    third-party HTTP client / vendor SDK.
+  * Retrieval is READ-ONLY — issue GET requests only, never mutate the
+    platform.
+  * TLS verification default: self-signed on-prem/lab controllers should
+    default to verification OFF with a ``--verify-tls`` flag to enable it
+    (matches aci/catc/nd_converter, since these platforms typically run
+    self-signed certs in the field). Public cloud APIs should default
+    verification ON with a ``--no-verify-tls`` flag to disable it (matches
+    meraki/netbox_converter). Pick whichever matches your platform's real
+    -world deployment; don't default a public API's TLS verification off.
+  * Never log the credential itself, only a success/failure message.
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import ssl
+import sys
+import urllib.error
+import urllib.request
+from typing import Any, Dict, Optional
+
+
+class PlatformClient:
+    """Minimal read-only PLATFORM REST client.
+
+    TODO: replace the auth scheme below with your platform's real one (HTTP
+    Basic, a login-then-bearer-token flow like nd_converter, an API-key
+    header like meraki_converter, ...).
+    """
+
+    def __init__(self, host: str, verify_tls: bool = False, timeout: int = 60) -> None:
+        self.base = host if host.startswith("http") else f"https://{host}"
+        self.timeout = timeout
+        self.token: Optional[str] = None
+        if verify_tls:
+            self.ctx: Optional[ssl.SSLContext] = None
+        else:
+            self.ctx = ssl.create_default_context()
+            self.ctx.check_hostname = False
+            self.ctx.verify_mode = ssl.CERT_NONE
+
+    def _request(self, path: str, data: Optional[dict] = None) -> Any:
+        url = self.base + path
+        headers = {"Content-Type": "application/json"}
+        if self.token:
+            headers["Authorization"] = f"Bearer {self.token}"
+        body = json.dumps(data).encode() if data is not None else None
+        req = urllib.request.Request(
+            url, data=body, headers=headers,
+            method="POST" if data is not None else "GET",
+        )
+        with urllib.request.urlopen(req, context=self.ctx, timeout=self.timeout) as resp:
+            raw = resp.read().decode("utf-8", errors="replace")
+            return json.loads(raw) if raw.strip() else None
+
+    def login(self, user: str, password: str) -> None:
+        # TODO: replace with your platform's real login endpoint/response shape.
+        resp = self._request("/login", {"username": user, "password": password})
+        self.token = resp.get("token")
+        if not self.token:
+            raise RuntimeError("login succeeded but no token in response")
+
+    def get(self, path: str) -> Any:
+        return self._request(path)
+
+
+def fetch_model(client: PlatformClient) -> Dict[str, Any]:
+    """Return a combined-JSON document ready for ``convert.py``.
+
+    TODO: replace with your platform's real endpoints. Each query should be
+    independent and a failed one skipped (not fatal) — see nd_converter's
+    ``fetch_from_nd.py`` ``_grab()`` helper for the pattern: a partial fetch
+    should still produce the best diagram the data allows.
+    """
+    out: Dict[str, Any] = {
+        "_meta": {"source": "PLATFORM", "host": client.base},
+        "devices": [],
+        "interfaces": [],
+        "links": [],
+    }
+
+    def _grab(path: str, label: str) -> Any:
+        try:
+            return client.get(path)
+        except (urllib.error.URLError, RuntimeError, ValueError) as exc:
+            print(f"    {label}: [skipped: {exc}]", file=sys.stderr)
+            return None
+
+    out["devices"] = _grab("/api/devices", "devices") or []
+    out["interfaces"] = _grab("/api/interfaces", "interfaces") or []
+    out["links"] = _grab("/api/links", "links") or []
+    print(f"  devices={len(out['devices'])} interfaces={len(out['interfaces'])} "
+          f"links={len(out['links'])}", file=sys.stderr)
+    return out
+
+
+def main(argv: Optional[list] = None) -> int:
+    p = argparse.ArgumentParser(
+        description="Pull a PLATFORM model over its REST API (read-only).",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=__doc__,
+    )
+    p.add_argument("--host", required=True, help="PLATFORM controller IP / hostname.")
+    p.add_argument("--user", default="admin", help="Username (default: admin).")
+    p.add_argument("--password", default=None,
+                   help="Password (or set the PLATFORM_PASSWORD env var).")
+    # TODO: pick ONE of these two TLS defaults based on your platform (see the
+    # module docstring's "TLS verification default" convention) and delete
+    # the other.
+    p.add_argument("--verify-tls", action="store_true",
+                   help="Enforce TLS cert verification (default: off — self-signed on-prem controller).")
+    # p.add_argument("--no-verify-tls", action="store_false", dest="verify_tls", default=True,
+    #                help="Disable TLS cert verification (default: on — public cloud API).")
+    p.add_argument("--out", default="platform_export.json",
+                   help="Output JSON path (default: platform_export.json).")
+    args = p.parse_args(argv)
+
+    password = args.password or os.environ.get("PLATFORM_PASSWORD")
+    if not password:
+        print("[ERROR] password required: pass --password or set PLATFORM_PASSWORD.",
+              file=sys.stderr)
+        return 2
+
+    client = PlatformClient(args.host, verify_tls=args.verify_tls)
+    try:
+        client.login(args.user, password)
+    except (urllib.error.URLError, RuntimeError, KeyError, ValueError) as exc:
+        print(f"[ERROR] login failed: {exc}", file=sys.stderr)
+        return 1
+    print(f"[ok] authenticated to {args.host} as {args.user}", file=sys.stderr)
+
+    try:
+        doc = fetch_model(client)
+    except (urllib.error.URLError, RuntimeError) as exc:
+        print(f"[ERROR] fetch failed: {exc}", file=sys.stderr)
+        return 1
+
+    with open(args.out, "w", encoding="utf-8") as fh:
+        json.dump(doc, fh, indent=1, ensure_ascii=False)
+    print(f"[ok] wrote {args.out}", file=sys.stderr)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
