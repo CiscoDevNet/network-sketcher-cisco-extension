@@ -1,0 +1,52 @@
+{
+    "version": {
+        "value": 0.5,
+        "description": "catc_converter config schema version.",
+        "sample": 0.5
+    },
+    "site_include": {
+        "value": [],
+        "description": "If non-empty, ONLY these fabric-site area names (site-hierarchy leaf) are converted. Empty = all sites.",
+        "sample": ["CML-Lab"]
+    },
+    "device_naming": {
+        "value": "hostname",
+        "description": "Device-name source for campus devices: 'hostname' (default), 'hostname_ip', or 'ip'.",
+        "sample": "hostname_ip"
+    },
+    "strip_domain_suffix": {
+        "value": ".dcloud.cisco.com",
+        "description": "Suffix removed from a device hostname when present (e.g. the dCloud domain). Set to \"\" to keep full FQDNs.",
+        "sample": ".example.com"
+    },
+    "include_external_neighbors": {
+        "value": true,
+        "description": "Underlay: draw physical-topology neighbours that are NOT Catalyst-Center-managed devices as gray external waypoints.",
+        "sample": false
+    },
+    "vlan_base": {
+        "value": 101,
+        "description": "Overlay: first synthetic VLAN id used for an anycast gateway that carries no vlanId.",
+        "sample": 1001
+    },
+    "include_endpoints": {
+        "value": true,
+        "description": "Overlay: draw real clients/hosts from the clients API beneath a segment in their site (host side = L3 IP, segment side = VLAN). No-op when the export carries no clients.",
+        "sample": false
+    },
+    "max_endpoints_per_vn": {
+        "value": 20,
+        "description": "Overlay: cap on real clients drawn per segment; excess are noted in the report. Lower for very large deployments.",
+        "sample": 50
+    },
+    "emit_sgt_flows": {
+        "value": false,
+        "description": "Flow list: emit SGT / group-based-access-control policy as flow rows (SD-Access is open within a VN; off by default. SGT flow emission is not implemented yet — currently always emits no rows).",
+        "sample": true
+    },
+    "color_overrides": {
+        "value": {},
+        "description": "Map of NS device name -> [R,G,B] to override the role-based colour (reserved).",
+        "sample": {"CML-Lab-core1": [255, 204, 204]}
+    }
+}

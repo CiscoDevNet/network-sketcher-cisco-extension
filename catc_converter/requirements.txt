@@ -1,0 +1,8 @@
+# catc_converter requires only the Python standard library (3.10+).
+#
+# The Catalyst Center / DNA Center export is JSON and the live fetch uses
+# urllib+ssl, so everything is stdlib:
+#   argparse, base64, csv, json, pathlib, re, sys, tarfile, ssl, urllib,
+#   collections, dataclasses, typing
+#
+# (intentionally empty — no third-party dependencies)
