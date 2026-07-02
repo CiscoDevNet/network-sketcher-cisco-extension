@@ -1,0 +1,39 @@
+# Generated output (kept out of version control)
+Output_data/*
+!Output_data/.gitkeep
+
+# Input exports are org-specific; don't commit real Meraki data.
+# (the bundled DevNet-sandbox meraki_export.json is kept as an example input)
+Input_data/*
+!Input_data/.gitkeep
+!Input_data/meraki_export.json
+
+# Raw per-call API snapshots written by fetch_from_meraki.py
+Input_data/raw/
+
+# Generated artifacts if ever written next to the script
+ns_commands_meraki.txt
+ns_model_meraki.json
+meraki_inventory.csv
+meraki_report.md
+\[MASTER\]*.nsm
+\[L1_DIAGRAM\]*
+\[L2_DIAGRAM\]*
+\[L3_DIAGRAM\]*
+\[L1L2L3_DIAGRAM\]*
+\[DEVICE_TABLE\]*
+\[AI_Context\]*
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.env
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

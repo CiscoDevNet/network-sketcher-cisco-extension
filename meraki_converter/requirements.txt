@@ -1,0 +1,12 @@
+# meraki_converter has NO third-party dependencies.
+# It uses only the Python 3.8+ standard library:
+#   argparse, collections, csv, dataclasses, itertools, json, math, os,
+#   pathlib, random, re, ssl, statistics, sys, time, typing, urllib
+#
+# (fetch_from_meraki.py talks to the Meraki Dashboard API over urllib/ssl —
+#  still standard library, no `requests`/`meraki` SDK required.)
+#
+# Tested on CPython 3.8-3.12 (Windows, macOS, Linux).
+# This file is intentionally empty of packages; it exists so that
+#   pip install -r requirements.txt
+# succeeds as a no-op in CI / setup scripts.

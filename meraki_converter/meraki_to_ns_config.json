@@ -1,0 +1,52 @@
+{
+    "version": {
+        "value": 0.5,
+        "description": "meraki_converter config schema version.",
+        "sample": 0.5
+    },
+    "network_include": {
+        "value": [],
+        "description": "If non-empty, ONLY these network IDs or names are converted. Overrides network_exclude.",
+        "sample": ["branch_office", "L_669910444571383171"]
+    },
+    "network_exclude": {
+        "value": [],
+        "description": "Network IDs or names to skip. Ignored when network_include is set.",
+        "sample": ["lab-test"]
+    },
+    "synthesize_l1": {
+        "value": true,
+        "description": "Build a standard MX->MS->MR/MV branch topology when GET /topology/linkLayer returns no observed links (offline/virtual devices). Set false to emit devices only, no links.",
+        "sample": true
+    },
+    "add_internet_waypoint": {
+        "value": true,
+        "description": "Add a synthetic 'Internet' cloud waypoint and link each MX appliance WAN port to it.",
+        "sample": true
+    },
+    "include_clients": {
+        "value": false,
+        "description": "Draw network clients (from GET /networks/{id}/clients, fetched only with --include-clients) as PC endpoints. Off by default to keep diagrams clean.",
+        "sample": true
+    },
+    "stencil_overrides": {
+        "value": {},
+        "description": "Map of NS device name -> NS Stencil Type (Router/L3Switch/Switch/Firewall/WLC/AP/Server/Cloud/PC/Phone) to override the productType-based default.",
+        "sample": {"MX100_YL5K": "Router"}
+    },
+    "color_overrides": {
+        "value": {},
+        "description": "Map of NS device name -> [R,G,B] to override the role-based 'Default' cell colour.",
+        "sample": {"MV12W_LMGX": [204, 229, 255]}
+    },
+    "ap_management_model": {
+        "value": true,
+        "description": "Model each Meraki MR access point as the L2 bridge it actually is: the wired uplink carries the native L2 segment (matching the connected switch port, plus any VLAN-tagged SSID VLANs = a trunk); a synthetic 'Dummy_mgmt 0' management SVI is bound to that segment and receives the AP's management IP when one exists (lanIp); and each enabled SSID becomes a PHYSICAL port ('<SSID name> <n>', or 'wlan <n>' when the name is unknown) L1-linked to the same switch and bound to its L2 segment. Set false to fall back to placing the management IP directly on the physical uplink port.",
+        "sample": true
+    },
+    "ap_untagged_segment_name": {
+        "value": "untag",
+        "description": "FALLBACK native L2 segment name for an MR access point that has no upstream switch (e.g. attached straight to the MX). When the AP connects to a switch it instead REUSES that switch port's L2 segment name (e.g. 'Vlan1') so the two share one broadcast domain - a standalone name like 'untag' would form a separate domain and leave the AP isolated at L2. Tagged SSIDs always use their own 'Vlan<id>' segment. Only applies when ap_management_model is true.",
+        "sample": "untag"
+    }
+}
