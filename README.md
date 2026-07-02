@@ -172,9 +172,10 @@ the logical **overlay** (Tenant → VRF → Bridge Domain → EPG, with contract
 hand. **Acquisition (API) and conversion (offline) are separate steps**, so one
 fetch can drive many conversions.
 
-<img width="2237" height="1181" alt="image" src="https://github.com/user-attachments/assets/04087f24-f6e1-4251-a222-2e127cd10bd4" />
+<img width="2237" height="1181" alt="aci1" src="https://github.com/user-attachments/assets/ad3b3274-cfeb-4dcf-b104-72aac5a7145a" />
 
-<img width="1766" height="252" alt="image" src="https://github.com/user-attachments/assets/a7dde2cf-89e0-4356-a468-1a958716c18f" />
+<img width="1766" height="252" alt="aci2" src="https://github.com/user-attachments/assets/90c5298d-3cf9-441a-820f-27fa9ea92aa8" />
+
 
 [sample_aci.zip](https://github.com/user-attachments/files/29280501/sample_aci.zip)
 
