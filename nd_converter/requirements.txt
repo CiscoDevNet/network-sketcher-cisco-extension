@@ -1,0 +1,8 @@
+# nd_converter requires only the Python standard library (3.10+).
+#
+# The Nexus Dashboard / NDFC export is JSON and the live fetch uses urllib+ssl,
+# so everything is stdlib:
+#   argparse, csv, json, pathlib, re, sys, tarfile, ssl, urllib,
+#   collections, dataclasses, typing
+#
+# (intentionally empty — no third-party dependencies)

@@ -1,0 +1,47 @@
+{
+    "version": {
+        "value": 0.5,
+        "description": "nd_converter config schema version.",
+        "sample": 0.5
+    },
+    "fabric_include": {
+        "value": [],
+        "description": "If non-empty, ONLY these NDFC fabric names are converted (underlay + overlay).",
+        "sample": ["DevNet_VxLAN_Fabric"]
+    },
+    "switch_naming": {
+        "value": "name",
+        "description": "Device-name source for fabric switches: 'name' (logicalName), 'name_ip', 'ip', or 'serial'.",
+        "sample": "name_ip"
+    },
+    "include_external_neighbors": {
+        "value": true,
+        "description": "Underlay: draw switches reached only via 'lan_neighbor_link' (ISN/edge/core, not in the fabric inventory) as gray external waypoints.",
+        "sample": false
+    },
+    "vlan_base": {
+        "value": 101,
+        "description": "Overlay: first synthetic VLAN id used for a Network that has no vlanId in its template config.",
+        "sample": 1001
+    },
+    "include_endpoints": {
+        "value": true,
+        "description": "Overlay: draw real hosts from Endpoint Locator beneath their Network (host side = L3 IP, network side = BD VLAN). No-op when the export carries no endpoints (EPL disabled).",
+        "sample": false
+    },
+    "max_endpoints_per_network": {
+        "value": 50,
+        "description": "Overlay: cap on real endpoints drawn per Network; excess are noted in the report. Lower for very large fabrics.",
+        "sample": 20
+    },
+    "emit_intra_vrf_flows": {
+        "value": false,
+        "description": "Flow list: emit implied any-to-any reachability between Networks that share a VRF (VXLAN EVPN is open within a VRF; off by default to avoid an O(n^2) explosion).",
+        "sample": true
+    },
+    "color_overrides": {
+        "value": {},
+        "description": "Map of NS device name -> [R,G,B] to override the role-based colour (reserved).",
+        "sample": {"site1-leaf1": [255, 204, 204]}
+    }
+}

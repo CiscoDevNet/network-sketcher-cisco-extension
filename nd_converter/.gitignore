@@ -1,0 +1,39 @@
+# Generated output (kept out of version control)
+Output_data/*
+!Output_data/.gitkeep
+
+# Input exports are site-specific; don't commit real Nexus Dashboard exports
+# (the bundled sample_*.json files are the exception, kept as examples)
+Input_data/*
+!Input_data/.gitkeep
+!Input_data/sample_nd_export.json
+
+# Generated artifacts if ever written next to the script
+ns_commands*.txt
+ns_model_*.json
+gen_*.csv
+nd_inventory.csv
+nd_underlay_report.md
+nd_overlay_report.md
+nd_export.json
+\[MASTER\]*.nsm
+\[L1_DIAGRAM\]*
+\[L2_DIAGRAM\]*
+\[L3_DIAGRAM\]*
+\[L1L2L3_DIAGRAM\]*
+\[DEVICE_TABLE\]*
+\[AI_Context\]*
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.env
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
