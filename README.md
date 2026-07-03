@@ -131,50 +131,6 @@ Network Sketcher CLI command output).
 
 ---
 
-## 3rd Party Tool 1 — `netbox_converter`
-
-Convert a NetBox DCIM/IPAM instance into a ready-to-run Network Sketcher
-command script reconstructing L1/L2/L3. The model is pulled from NetBox over
-its **read-only REST API** (`fetch_from_netbox`) — so there is no file to
-prepare by hand. **Acquisition (API) and conversion (offline) are separate
-steps**, so one fetch can drive many conversions.
-
-> **Full documentation** (placement/connection logic, config keys, data
-> coverage and known limitations) is in
-> [`3rd_party/netbox_converter/README.md`](./3rd_party/netbox_converter/).
-
-### Installation
-
-```bash
-pip install -r 3rd_party/netbox_converter/requirements.txt   # networkx
-```
-
-### Usage
-
-Because `3rd_party` cannot be a Python package name (it starts with a digit),
-run these as modules **from the `3rd_party/` directory**:
-
-```bash
-cd 3rd_party
-
-# 1. Fetch the instance over the read-only REST API
-#    (token via the NETBOX_TOKEN env var)
-NETBOX_TOKEN=... python -m netbox_converter.src.fetch_from_netbox \
-    --url https://netbox.example.com \
-    --out netbox_converter/Input_data/netbox_export.json
-
-# 2. Convert offline (no NetBox connection)
-python -m netbox_converter.src.convert \
-    -i netbox_converter/Input_data/netbox_export.json \
-    -o netbox_converter/Output_data/ns_commands_netbox.txt \
-    -c netbox_converter/netbox_to_ns_config.json
-```
-
-Then run the commands in Network Sketcher — see
-[Running the output in Network Sketcher](#running-the-output-in-network-sketcher).
-
----
-
 ## Tool 1 — `aci_converter`
 
 Convert a Cisco ACI fabric into Network Sketcher command scripts — both the
@@ -652,6 +608,50 @@ Then run the commands in Network Sketcher — see
 [Running the output in Network Sketcher](#running-the-output-in-network-sketcher).
 The `gen_flow_list.csv` can additionally be pasted into the master's
 `[Flow_List]` sheet.
+
+---
+
+## 3rd Party Tool 1 — `netbox_converter`
+
+Convert a NetBox DCIM/IPAM instance into a ready-to-run Network Sketcher
+command script reconstructing L1/L2/L3. The model is pulled from NetBox over
+its **read-only REST API** (`fetch_from_netbox`) — so there is no file to
+prepare by hand. **Acquisition (API) and conversion (offline) are separate
+steps**, so one fetch can drive many conversions.
+
+> **Full documentation** (placement/connection logic, config keys, data
+> coverage and known limitations) is in
+> [`3rd_party/netbox_converter/README.md`](./3rd_party/netbox_converter/).
+
+### Installation
+
+```bash
+pip install -r 3rd_party/netbox_converter/requirements.txt   # networkx
+```
+
+### Usage
+
+Because `3rd_party` cannot be a Python package name (it starts with a digit),
+run these as modules **from the `3rd_party/` directory**:
+
+```bash
+cd 3rd_party
+
+# 1. Fetch the instance over the read-only REST API
+#    (token via the NETBOX_TOKEN env var)
+NETBOX_TOKEN=... python -m netbox_converter.src.fetch_from_netbox \
+    --url https://netbox.example.com \
+    --out netbox_converter/Input_data/netbox_export.json
+
+# 2. Convert offline (no NetBox connection)
+python -m netbox_converter.src.convert \
+    -i netbox_converter/Input_data/netbox_export.json \
+    -o netbox_converter/Output_data/ns_commands_netbox.txt \
+    -c netbox_converter/netbox_to_ns_config.json
+```
+
+Then run the commands in Network Sketcher — see
+[Running the output in Network Sketcher](#running-the-output-in-network-sketcher).
 
 ---
 
