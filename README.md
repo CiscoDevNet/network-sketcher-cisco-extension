@@ -7,6 +7,9 @@ so you can rebuild an accurate L1/L2/L3 topology — devices, links, VLANs, SVIs
 sub-interfaces, IP addressing and VRFs — in seconds instead of drawing it by
 hand.
 
+<img width="1335" height="704" alt="image" src="https://github.com/user-attachments/assets/1dededa6-3d7d-4f7e-8606-c9dacd2684c1" />
+
+
 > [!IMPORTANT]
 > **The quality of each converted topology depends entirely on what data each
 > Cisco product is able to provide** — whether obtained as a file export or
