@@ -129,6 +129,20 @@ Network Sketcher CLI command output).
 |---------|------|--------------|-------|--------|
 | NetBox | [`netbox_converter`](./3rd_party/netbox_converter/) | Convert a NetBox DCIM/IPAM instance into a Network Sketcher command script reconstructing L1/L2/L3, reusing the same placement logic as the Network Sketcher Offline edition's NetBox CSV import. | NetBox instance via read-only REST API (`fetch_from_netbox`) → JSON | ✅ Available |
 
+---
+
+## 3rd Party Tool 1 — `netbox_converter`
+
+Convert a NetBox DCIM/IPAM instance into a ready-to-run Network Sketcher
+command script reconstructing L1/L2/L3. The model is pulled from NetBox over
+its **read-only REST API** (`fetch_from_netbox`) — so there is no file to
+prepare by hand. **Acquisition (API) and conversion (offline) are separate
+steps**, so one fetch can drive many conversions.
+
+> **Full documentation** (placement/connection logic, config keys, data
+> coverage and known limitations) is in
+> [`3rd_party/netbox_converter/README.md`](./3rd_party/netbox_converter/).
+
 ### Installation
 
 ```bash
@@ -156,9 +170,8 @@ python -m netbox_converter.src.convert \
     -c netbox_converter/netbox_to_ns_config.json
 ```
 
-See [`3rd_party/netbox_converter/README.md`](./3rd_party/netbox_converter/)
-for the full documentation (placement/connection logic, config keys, data
-coverage and known limitations).
+Then run the commands in Network Sketcher — see
+[Running the output in Network Sketcher](#running-the-output-in-network-sketcher).
 
 ---
 
