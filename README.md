@@ -248,6 +248,9 @@ over its **read-only Intent REST API** (`fetch_from_catc`) — so there is no
 file to prepare by hand. **Acquisition (API) and conversion (offline) are
 separate steps**, so one fetch can drive many conversions.
 
+<img width="907" height="555" alt="image" src="https://github.com/user-attachments/assets/1ca7d68c-6c8e-4007-a7bb-a3f988fe3121" />
+
+
 > **Full documentation** (the underlay/overlay model, what is observed vs.
 > synthesized, `fetch_from_catc` options, device/segment naming, colour
 > conventions, accuracy caveats, known issues) is in
@@ -447,6 +450,8 @@ the **Meraki Dashboard API v1** into a JSON file, and the converter turns that
 local file into a Network Sketcher command script, so the conversion is
 reproducible offline (e.g. after a DevNet Sandbox reservation expires).
 
+<img width="1266" height="666" alt="image" src="https://github.com/user-attachments/assets/8ec8110b-2896-4140-a1bc-3b12462abdd5" />
+
 > [!NOTE]
 > `meraki_converter` has so far only been validated end-to-end against the
 > **DevNet Reservable Meraki Sandbox**. Several live-data code paths
@@ -518,6 +523,9 @@ reachability as an opt-in `[Flow_List]` traffic matrix). The fabric model is
 pulled from Nexus Dashboard over its **read-only REST API** (`fetch_from_nd`)
 — so there is no file to prepare by hand. **Acquisition (API) and conversion
 (offline) are separate steps**, so one fetch can drive many conversions.
+
+<img width="1279" height="633" alt="image" src="https://github.com/user-attachments/assets/fa648322-e112-4bda-8508-9cbc42dd2870" />
+
 
 > [!NOTE]
 > Validated end-to-end against a live **Nexus Dashboard 4.1.1** (NDFC / Fabric
