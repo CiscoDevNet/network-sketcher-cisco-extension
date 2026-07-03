@@ -619,6 +619,8 @@ its **read-only REST API** (`fetch_from_netbox`) — so there is no file to
 prepare by hand. **Acquisition (API) and conversion (offline) are separate
 steps**, so one fetch can drive many conversions.
 
+<img width="963" height="531" alt="image" src="https://github.com/user-attachments/assets/8945d126-c673-4195-87cf-fec4f7c9dcbd" />
+
 > **Full documentation** (placement/connection logic, config keys, data
 > coverage and known limitations) is in
 > [`3rd_party/netbox_converter/README.md`](./3rd_party/netbox_converter/).
