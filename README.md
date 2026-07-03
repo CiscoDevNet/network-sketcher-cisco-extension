@@ -21,6 +21,9 @@ hand.
 > Each converter has so far been validated against a limited number of
 > samples (sandbox/demo environments); we expect validation against further
 > real-world data to keep improving output quality.
+> A feature to consolidate the individual NSM master files each converter/mode
+> currently requires into a single unified master is still only at the
+> planning stage — it is not yet decided or scheduled for implementation.
 
 Each tool targets a different data source, can be used independently, and the
 **conversion runs entirely on local files** (no live platform connection is
