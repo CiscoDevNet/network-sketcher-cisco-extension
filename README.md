@@ -134,6 +134,30 @@ Network Sketcher CLI command output).
 
 ---
 
+## `template_converter` — scaffold for building new converters
+
+`template_converter/` is not a converter itself — it is a copy-paste
+starting point for building a **new** "Platform X → Network Sketcher"
+converter (Cisco or third-party) when this repository's toolset needs to be
+extended. It documents the architecture every converter here shares (which
+files are copy-verbatim vs. platform-specific), the credential/security
+conventions, and the README conventions used repo-wide.
+
+It is written primarily for **AI coding agents** to read and follow
+directly — every converter in this repo was itself built by an AI agent —
+though it works equally well as a reference for a human contributor. The
+command-generation logic it documents (`ns_command_builder.py`'s Phase 1–6
+ordering and the numbered `RULE N` constraints referenced throughout the
+shared code) is grounded directly in Network Sketcher's own **AI Context**
+export — the `[AI_Context]<master>.txt` file produced by the
+`network-sketcher` MCP server (`get_ai_context` / `build_default_outputs`),
+which documents the full CLI command reference and syntax rules.
+
+See [`template_converter/GUIDE.md`](./template_converter/) for the full
+authoring guide.
+
+---
+
 ## Tool 1 — `aci_converter`
 
 Convert a Cisco ACI fabric into Network Sketcher command scripts — both the
