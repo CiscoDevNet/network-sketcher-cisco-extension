@@ -2,7 +2,7 @@
     "_description": "Configuration for cv_to_ns_commands.py (Cisco Cyber Vision CSV -> Network Sketcher). Every key is optional; omit one to use its code default. Only 'value' is read by the script; 'description' and 'sample' are documentation only. Zone classification is intentionally minimal-automatic: group_zone_override is the authoritative place to pin site-specific group names to a Purdue zone.",
 
     "version": {
-        "value": 0.1,
+        "value": 0.5,
         "description": "Version of this configuration file schema."
     },
 

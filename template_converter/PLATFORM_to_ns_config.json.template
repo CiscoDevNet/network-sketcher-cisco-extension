@@ -1,8 +1,8 @@
 {
     "version": {
-        "value": 0.1,
+        "value": 0.5,
         "description": "PLATFORM_converter config schema version.",
-        "sample": 0.1
+        "sample": 0.5
     },
     "device_naming": {
         "value": "name",

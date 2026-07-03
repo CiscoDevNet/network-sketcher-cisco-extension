@@ -1,8 +1,8 @@
 {
     "version": {
-        "value": 0.2,
+        "value": 0.5,
         "description": "netbox_converter config schema version.",
-        "sample": 0.2
+        "sample": 0.5
     },
     "draw_wan_waypoints": {
         "value": true,
