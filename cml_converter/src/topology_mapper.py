@@ -74,6 +74,7 @@ class NSDevice:
     routing_attribute: str = ""    # free-text BGP/OSPF/EVPN summary (RULE 11.5 + Attribute-D)
     x: Optional[float] = None      # CML canvas X coordinate (None if absent)
     y: Optional[float] = None      # CML canvas Y coordinate (None if absent)
+    default_color: Optional[Tuple[int, int, int]] = None  # overrides role colour in the Attribute 'Default' cell
 
 
 @dataclass

@@ -107,6 +107,44 @@ cml_converter/
 └── src/                 (entry point: convert.py)
 ```
 
+## Changelog
+
+- **Bug fix**: `topology_mapper.py`'s `assign_areas_and_rows()` passed a
+  `default_color=` keyword argument to `NSDevice(...)` (intended to render an
+  observed `external_connector` WayPoint in light blue instead of the
+  inferred-WayPoint gray — see "Device color conventions" above) that the
+  local `NSDevice` dataclass did not declare as a field. This raised
+  `TypeError: __init__() got an unexpected keyword argument 'default_color'`
+  for **every** CML lab, so `convert.py` could not complete a single
+  conversion. Root cause: unlike the other converters in this repo,
+  `cml_converter` defines `NSDevice` inline in `topology_mapper.py` instead of
+  a separate `ns_model.py`; when the `default_color` override field (present
+  in `template_converter/src/ns_model.py` and
+  `3rd_party/netbox_converter/src/ns_model.py`) was reused here, the field
+  declaration itself was never copied over. Fixed by adding the missing
+  `default_color: Optional[Tuple[int, int, int]] = None` field to `NSDevice`
+  and by making `ns_command_builder.cmd_rename_attribute_bulk()` actually
+  consume it (a per-device colour override wins over the role-based colour),
+  matching the pattern already used by `template_converter` /
+  `netbox_converter`. Verified with a synthetic lab containing an
+  `external_connector` node: `convert.py` now completes without exceptions
+  and the generated `rename attribute_bulk` command colours the connector's
+  `Default` cell `[220, 230, 242]` (light blue) instead of falling back to
+  the generic WayPoint gray — confirmed live in Network Sketcher via the
+  `network-sketcher` MCP (`row_colors` in the exported Device Table shows
+  `rgb(220,230,242)` on the `inet_bridge` row).
+
+- **Bug fix**: `stencil_mapper.py`'s keyword-heuristic fallback used to embed the
+  matched keyword in single quotes when building the Model string (e.g.
+  `Spine Switch (inferred from 'spine')`). Because the shared `ns_command_builder.py`
+  escaping convention (`\'`) is not correctly round-tripped by the live Network
+  Sketcher engine's `rename attribute_bulk` cell parser, this produced an
+  `invalid syntax` warning at runtime and left the Model cell empty for every
+  keyword-matched device. Fixed by dropping the quote characters instead of
+  escaping them — the keyword is now embedded as plain text (e.g.
+  `Spine Switch (inferred from spine)`). No change to `ns_command_builder.py`
+  (shared across converters) or to the meaning of the Model string itself.
+
 ## Cisco Technologies
 
 This tool bridges two Cisco technologies:

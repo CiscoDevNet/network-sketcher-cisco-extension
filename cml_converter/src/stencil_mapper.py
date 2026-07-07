@@ -148,7 +148,18 @@ def map_one(
                 node_definition=node_definition,
                 image_definition=image_definition,
                 stencil_type=stencil,
-                model=model + f" (inferred from '{kw}')",
+                # NOTE (live Network Sketcher engine verification): do not wrap
+                # `kw` in quote characters here -- ns_command_builder.py's
+                # shared, do-not-customise `_attr_cell()` backslash-escapes
+                # embedded apostrophes (`\'`) the way the rest of this
+                # module's Model/OS/reason strings expect, but the live
+                # Network Sketcher engine's own `rename attribute_bulk` cell
+                # parser does not correctly round-trip that escape for the
+                # Model column -- it drops the backslash before parsing the
+                # cell, which then fails with "invalid syntax" and leaves the
+                # cell empty. Embedding `kw` without quotes avoids the engine
+                # bug without touching the shared ns_command_builder.py.
+                model=model + f" (inferred from {kw})",
                 os=os_str,
                 confidence=conf,
                 reason=f"keyword match '{kw}' in {'label' if kw in lab_lower else 'tag'}",
