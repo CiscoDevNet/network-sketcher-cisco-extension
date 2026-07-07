@@ -286,13 +286,20 @@ def cmd_rename_attribute_bulk(model: NSModel) -> str:
     for name, d in sorted(model.devices.items()):
         is_waypoint_area = d.area.endswith("_wp_") or d.stencil.stencil_type == NS_CLOUD
         if is_waypoint_area:
-            default_cell = _attr_cell("WayPoint", _COLOR_WAYPOINT)
+            token, rgb = "WayPoint", _COLOR_WAYPOINT
         elif d.stencil.stencil_type == NS_SERVER:
-            default_cell = _attr_cell("DEVICE", _COLOR_SERVER)
+            token, rgb = "DEVICE", _COLOR_SERVER
         elif d.stencil.stencil_type in (NS_PC, NS_PHONE):
-            default_cell = _attr_cell("DEVICE", _COLOR_PC)
+            token, rgb = "DEVICE", _COLOR_PC
         else:  # Router / L3Switch / Switch / Firewall / WLC / AP
-            default_cell = _attr_cell("DEVICE", _COLOR_NET)
+            token, rgb = "DEVICE", _COLOR_NET
+        # A per-device override (e.g. an OBSERVED external_connector waypoint,
+        # which is a real bridge device rather than an inferred WAN cloud)
+        # wins over the role-based colour; the token (DEVICE / WayPoint) is
+        # left to the stencil.
+        if getattr(d, "default_color", None):
+            rgb = d.default_color
+        default_cell = _attr_cell(token, rgb)
         model_cell = _attr_cell(d.stencil.model, _COLOR_MODEL)
         os_cell = _attr_cell(d.stencil.os, _COLOR_OS)
         stencil_cell = _attr_cell(d.stencil.stencil_type, _COLOR_STENCIL)
