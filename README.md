@@ -7,7 +7,7 @@ so you can rebuild an accurate L1/L2/L3 topology — devices, links, VLANs, SVIs
 sub-interfaces, IP addressing and VRFs — in seconds instead of drawing it by
 hand.
 
-<img width="1335" height="704" alt="image" src="https://github.com/user-attachments/assets/1dededa6-3d7d-4f7e-8606-c9dacd2684c1" />
+<img alt="image" src="https://github.com/user-attachments/assets/1dededa6-3d7d-4f7e-8606-c9dacd2684c1" />
 
 
 > [!IMPORTANT]
@@ -112,9 +112,9 @@ logical **overlay** (Tenant → VRF → Bridge Domain → EPG, with contracts as
 `[Flow_List]` traffic matrix) — from a model pulled over the APIC's
 **read-only REST API** (`fetch_from_apic`).
 
-<img width="2237" height="1181" alt="aci1" src="https://github.com/user-attachments/assets/ad3b3274-cfeb-4dcf-b104-72aac5a7145a" />
+<img alt="aci1" src="https://github.com/user-attachments/assets/ad3b3274-cfeb-4dcf-b104-72aac5a7145a" />
 
-<img width="1766" height="252" alt="aci2" src="https://github.com/user-attachments/assets/90c5298d-3cf9-441a-820f-27fa9ea92aa8" />
+<img alt="aci2" src="https://github.com/user-attachments/assets/90c5298d-3cf9-441a-820f-27fa9ea92aa8" />
 
 
 [sample_aci.zip](https://github.com/user-attachments/files/29280501/sample_aci.zip)
@@ -133,7 +133,7 @@ Network Sketcher diagrams — the physical **underlay**
 **overlay** (Virtual Network → anycast-gateway segments) — from a model pulled
 over its **read-only Intent REST API** (`fetch_from_catc`).
 
-<img width="907" height="555" alt="image" src="https://github.com/user-attachments/assets/1ca7d68c-6c8e-4007-a7bb-a3f988fe3121" />
+<img alt="image" src="https://github.com/user-attachments/assets/1ca7d68c-6c8e-4007-a7bb-a3f988fe3121" />
 
 
 > **Full documentation** (installation, usage, the underlay/overlay model,
@@ -149,11 +149,11 @@ running-configs) into a ready-to-run Network Sketcher command script,
 reconstructing L1/L2/L3 entirely from local files (no CML connectivity at
 conversion time).
 
-<img width="1109" height="337" alt="image" src="https://github.com/user-attachments/assets/3fc59bf2-0ec9-43d1-986d-24dd63734c9c" />
+<img alt="image" src="https://github.com/user-attachments/assets/3fc59bf2-0ec9-43d1-986d-24dd63734c9c" />
 
-<img width="783" height="302" alt="image" src="https://github.com/user-attachments/assets/114883b4-74b0-4a68-a6e6-264940148568" />
+<img alt="image" src="https://github.com/user-attachments/assets/114883b4-74b0-4a68-a6e6-264940148568" />
 
-<img width="1227" height="588" alt="image" src="https://github.com/user-attachments/assets/4044d19d-332b-41d7-a34c-2329ccd34353" />
+<img alt="image" src="https://github.com/user-attachments/assets/4044d19d-332b-41d7-a34c-2329ccd34353" />
 
 
 [[L1L2L3_DIAGRAM]AllAreas_no_data_1.html](https://github.com/user-attachments/files/28463950/L1L2L3_DIAGRAM.AllAreas_no_data_1.html)
@@ -173,11 +173,11 @@ and `activities` CSV exports, laid out along the **Purdue model / IEC 62443 /
 CPwE zones** (Enterprise → IDMZ → Industrial → Cell/Area) — entirely from local
 files.
 
-<img width="2353" height="304" alt="image" src="https://github.com/user-attachments/assets/1add3423-2e36-44b4-bc80-f0e953253261" />
+<img alt="image" src="https://github.com/user-attachments/assets/1add3423-2e36-44b4-bc80-f0e953253261" />
 
-<img width="2319" height="437" alt="image" src="https://github.com/user-attachments/assets/61fa2a0c-7a26-413c-950a-ff1ec0c8bfd7" />
+<img alt="image" src="https://github.com/user-attachments/assets/61fa2a0c-7a26-413c-950a-ff1ec0c8bfd7" />
 
-<img width="2482" height="239" alt="image" src="https://github.com/user-attachments/assets/5fe8fb63-9c5a-4b79-afb9-9f527e5100ad" />
+<img alt="image" src="https://github.com/user-attachments/assets/5fe8fb63-9c5a-4b79-afb9-9f527e5100ad" />
 
 
 [cv_sample_1.zip](https://github.com/user-attachments/files/29197721/cv_sample_1.zip)
@@ -196,7 +196,7 @@ command script (L1/L2/L3) — from a model pulled over the **read-only Meraki
 Dashboard API v1** (`fetch_from_meraki`), so the conversion is reproducible
 offline (e.g. after a DevNet Sandbox reservation expires).
 
-<img width="1266" height="666" alt="image" src="https://github.com/user-attachments/assets/8ec8110b-2896-4140-a1bc-3b12462abdd5" />
+<img alt="image" src="https://github.com/user-attachments/assets/8ec8110b-2896-4140-a1bc-3b12462abdd5" />
 
 > [!NOTE]
 > Validated end-to-end only against the **DevNet Reservable Meraki Sandbox**;
@@ -217,7 +217,7 @@ fabric into two Network Sketcher diagrams — the physical **underlay**
 **overlay** (VRF → Network/L2VNI → anycast gateway) — from a model pulled over
 its **read-only REST API** (`fetch_from_nd`).
 
-<img width="1279" height="633" alt="image" src="https://github.com/user-attachments/assets/fa648322-e112-4bda-8508-9cbc42dd2870" />
+<img alt="image" src="https://github.com/user-attachments/assets/fa648322-e112-4bda-8508-9cbc42dd2870" />
 
 > [!NOTE]
 > Validated end-to-end against a live **Nexus Dashboard 4.1.1** (NDFC / Fabric
@@ -237,7 +237,7 @@ Network Analytics (SNA / Stealthwatch) NetFlow **Flow Search CSV** and produces
 a Network Sketcher command script plus a `[FLOW]` traffic matrix — entirely
 from a local file.
 
-<img width="1043" height="644" alt="image" src="https://github.com/user-attachments/assets/d2cb5e45-4eaa-44fb-869d-8527f93b8ea6" />
+<img alt="image" src="https://github.com/user-attachments/assets/d2cb5e45-4eaa-44fb-869d-8527f93b8ea6" />
 
 
 > **Full documentation** (installation, usage, site inference logic, endpoint
@@ -252,7 +252,7 @@ Convert a NetBox DCIM/IPAM instance into a ready-to-run Network Sketcher
 command script reconstructing L1/L2/L3 — from a model pulled over its
 **read-only REST API** (`fetch_from_netbox`).
 
-<img width="963" height="531" alt="image" src="https://github.com/user-attachments/assets/8945d126-c673-4195-87cf-fec4f7c9dcbd" />
+<img alt="image" src="https://github.com/user-attachments/assets/8945d126-c673-4195-87cf-fec4f7c9dcbd" />
 
 > **Full documentation** (installation, usage, placement/connection logic,
 > config keys, data coverage and known limitations) is in
