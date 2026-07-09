@@ -179,7 +179,7 @@ and ambiguous match is listed with reasoning.
 ## Configuration
 
 All tunables live in **`config_converter_to_ns_config.json`** (single config
-file; schema version **0.51**; the former `phase5_scenarios_config.json` was
+file; schema version **0.5.1**; the former `phase5_scenarios_config.json` was
 removed and its `site_scoping` scenario is now auto-detected for
 multi-subdirectory inputs).
 

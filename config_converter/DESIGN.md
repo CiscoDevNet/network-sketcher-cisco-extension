@@ -1289,9 +1289,9 @@ Follows the same `{"key": {"value":..., "description":..., "sample":...}}` forma
 ```json
 {
     "version": {
-        "value": 0.51,
+        "value": 0.5.1,
         "description": "config_converter config schema version.",
-        "sample": 0.51
+        "sample": 0.5.1
     },
     "recursive_scan": {
         "value": false,
