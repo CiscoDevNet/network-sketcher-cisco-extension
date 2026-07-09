@@ -12,3 +12,7 @@ venv/
 # '**/' also covers nested converters such as 3rd_party/netbox_converter/.
 **/Output_data/*
 !**/Output_data/.gitkeep
+
+# Local scratch / temp workspaces (not for commit)
+_tmp_ppt_fix/
+cml_converter/_tmp_test/

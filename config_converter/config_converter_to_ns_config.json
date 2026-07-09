@@ -1,0 +1,122 @@
+{
+    "version": {
+        "value": 0.51,
+        "description": "config_converter config schema version.",
+        "sample": 0.51
+    },
+    "recursive_scan": {
+        "value": false,
+        "description": "If true, scan Input_data subdirectories recursively for config files. If false, only the top-level directory is scanned (subdirectories are treated as site_scoping hints instead when site_scoping is enabled).",
+        "sample": true
+    },
+    "site_scoping": {
+        "value": false,
+        "description": "If true, each immediate subdirectory of the input directory is treated as an independent site; devices in different sites are never auto-linked even if they share the same subnet (mitigates false-positive links across NAT'd sites re-using the same RFC1918 range). Candidates that collide across sites with no other distinguishing evidence are written to config_excluded_links.csv instead of being rendered (DESIGN.md 4.3.6/4.3.9). If false, all input files are treated as one flat search space. When this key is NOT present in the JSON passed to --config, convert.py auto-enables site_scoping if it finds decodable config files in two or more immediate subdirectories (e.g. site_a/ + site_b/ under the input root) — no separate scenario config file is required.",
+        "sample": true
+    },
+    "l2_inference_enabled": {
+        "value": true,
+        "description": "Enable the requirement-C 'should we infer an L2 switch' gate (DESIGN.md 4.3.3): a subnet group with a virtual IP (HSRP/VRRP/GLBP), 3+ real candidates, or a prefix length <= large_subnet_prefix_threshold is treated as a shared LAN segment (see shared_subnet_strategy) instead of a plain point-to-point link, even when only 2 real candidates are known.",
+        "sample": true
+    },
+    "large_subnet_prefix_threshold": {
+        "value": 24,
+        "description": "A subnet whose prefix length is <= this value (e.g. /24, /23, /22 with the default 24) is considered 'large' for the purposes of l2_inference_enabled, since it has far more free addresses than a typical /30-/29 point-to-point link and therefore likely has a real L2 switch behind it (DESIGN.md 4.3.3).",
+        "sample": 23
+    },
+    "matching_algorithm": {
+        "value": "blossom",
+        "description": "Algorithm used to resolve which 2 interfaces are actually linked when 3+ candidates share the same subnet (after the l2_inference_enabled gate and the real-hub priority check in DESIGN.md 4.3.6 fail to resolve it): 'blossom' (networkx.algorithms.matching.min_weight_matching, the default and preferred method per DESIGN.md 8.3 decision 9) or 'brute_force' (exact optimum, stdlib-only fallback used automatically if networkx is unavailable, or when explicitly selected, and only when candidate count <= max_candidates_for_brute_force).",
+        "sample": "brute_force"
+    },
+    "max_candidates_for_brute_force": {
+        "value": 8,
+        "description": "When matching_algorithm is 'brute_force' (or networkx is unavailable), subnets with more directly-connected IP candidates than this are treated as a shared LAN segment (see shared_subnet_strategy) instead of being brute-force matched. Not a limit when matching_algorithm is 'blossom'.",
+        "sample": 6
+    },
+    "shared_subnet_strategy": {
+        "value": "best_pair",
+        "description": "How to represent a k>=3 subnet group when no real device in the group can be identified as the actual L2 hub (DESIGN.md 4.3.6 priority 1 fails): 'best_pair' (default; pick the single best-matching pair by degree-similarity, treat the rest as unmatched peers/candidates for requirement E) or 'synthetic_switch' (invent one gray 'Dummy_L2_<n>' switch and star-connect every candidate to it). Note: for a k==2 group flagged by l2_inference_enabled purely because of a virtual IP or a large subnet, a Dummy_L2_<n> switch is ALWAYS synthesized regardless of this key, since there is no pairing ambiguity to resolve in that case (DESIGN.md 4.3.6).",
+        "sample": "synthetic_switch"
+    },
+    "ignore_virtual_ips": {
+        "value": true,
+        "description": "Exclude HSRP/VRRP/GLBP virtual IPs from subnet-matching candidate pools (they do not belong to a single physical interface). Their presence still counts as a signal for l2_inference_enabled.",
+        "sample": true
+    },
+    "aggregate_access_peers": {
+        "value": true,
+        "description": "When an access-layer device (Switch stencil) has an unmatched subnet peer, synthesize at most one aggregated placeholder device per real device instead of one per interface, to avoid diagram clutter. This is now the ONLY granularity control for inferred devices (the naming format itself is fixed, see DESIGN.md 4.5.1).",
+        "sample": false
+    },
+    "assume_fully_connected": {
+        "value": true,
+        "description": "If true (DEFAULT, per DESIGN.md 8.1 decision 1), isolated topology components (connected components with no path to the rest of the network, EXCLUDING any component already placed in the isolated_area_name area by requirement G) are star-connected to one shared gray 'Dummy_CL_1' cloud waypoint so every device ends up reachable, per requirement F. If false, isolated components are placed as independent areas with no inferred inter-area link (opt-in conservative policy).",
+        "sample": false
+    },
+    "min_component_size_for_inference": {
+        "value": 2,
+        "description": "Minimum device count a connected component must have before assume_fully_connected will draw an inferred link for it (protects a single fully-isolated device from being force-connected).",
+        "sample": 3
+    },
+    "closed_environment_detection": {
+        "value": true,
+        "description": "Enable requirement-G closed-environment detection (shutdown interfaces, bidirectional deny-all ACLs, Null0 routes). A device flagged as fully closed is always placed in the dedicated isolated_area_name area (DESIGN.md 4.7.1, 8.1 decisions 2/6) -- there is no longer a 'flag only, keep in place' alternative.",
+        "sample": false
+    },
+    "isolated_area_name": {
+        "value": "Closed",
+        "description": "Name of the single dedicated area that collects (a) every requirement-G fully-closed device (shutdown / bidirectional deny-all ACL) AND (b) every truly LINKLESS device -- one with no L1 wiring at all (e.g. sample2's S1/S2), per DESIGN.md 4.4.1's waypoint-excluded area grouping. This area is rendered as a normal tiered grid area (not a WayPoint), always sorted to the rightmost position in the area row, and never receives an inter-area L1 link. Renamed from the historical default 'isolated' to 'Closed' when the linkless-device grouping was added (users may override).",
+        "sample": "isolated_devices"
+    },
+    "wan_confidence_threshold": {
+        "value": 0.5,
+        "description": "Minimum weighted WAN score (see DESIGN.md section 4.8, wan_signal_weights) for an unmatched interface to be linked to the shared gray WAN/Internet cloud waypoint instead of a generic inferred peer device.",
+        "sample": 0.6
+    },
+    "wan_signal_weights": {
+        "value": {
+            "description_keyword_match": 0.40,
+            "interface_type_wan_like": 0.30,
+            "ip_nat_outside": 0.30,
+            "public_ip_on_interface": 0.20,
+            "ip_address_dhcp_or_negotiated": 0.30,
+            "crypto_map_or_external_ipsec": 0.20,
+            "external_bgp_peer_detected": 0.40,
+            "bandwidth_limit_configured": 0.25,
+            "no_matching_peer_in_corpus": 0.10
+        },
+        "description": "Tentative, provisional per-signal point weights for requirement H's WAN scoring (DESIGN.md 4.8, 8.3 decision 8). Fully configurable: add, remove, or re-weight any signal here without a code change; wan_score is the clipped-to-[0,1] sum of every signal that fires. 'bandwidth_limit_configured' fires when a shape/police/priority/QoS bandwidth-limiting command is applied to the interface -- a new signal added per this decision.",
+        "sample": {"description_keyword_match": 0.5, "bandwidth_limit_configured": 0.35}
+    },
+    "wan_interface_overrides": {
+        "value": {},
+        "description": "Map of device name -> list of interface names to force-classify as WAN regardless of the automatic score (manual correction of requirement-H false negatives/positives). Always takes priority over wan_signal_weights.",
+        "sample": {"RTR01": ["GigabitEthernet0/0"]}
+    },
+    "wan_keywords": {
+        "value": ["wan", "internet", "isp", "mpls", "uplink"],
+        "description": "Description-field keywords (case-insensitive substring match, English/technical terms only per DESIGN.md 8.4 decision 13) that trigger the 'description_keyword_match' entry in wan_signal_weights.",
+        "sample": ["wan", "isp", "circuit"]
+    },
+    "role_keyword_overrides": {
+        "value": {},
+        "description": "Additional hostname/description keywords (English/technical terms only -- localisation to non-English languages is out of scope for this tool, DESIGN.md 8.4 decision 13) merged into the tier/role keyword dictionaries borrowed from 3rd_party/netbox_converter's netbox_layout.py, for organisation-specific naming conventions.",
+        "sample": {"core": ["core", "backbone"]}
+    },
+    "stencil_overrides": {
+        "value": {},
+        "description": "Map of NS device name -> NS Stencil Type (Router/L3Switch/Switch/Firewall/WLC/AP/Server/Cloud/PC/Phone) to override the heuristic default.",
+        "sample": {"RTR01": "Firewall"}
+    },
+    "color_overrides": {
+        "value": {},
+        "description": "Map of NS device name -> [R,G,B] to override the role-based Default-cell colour.",
+        "sample": {"RTR01": [255, 204, 204]}
+    },
+    "_scenarios": {
+        "description": "Documentation-only (ignored by convert.py). Historical note: phase5_scenarios_config.json was removed — its only functional difference from this file was site_scoping=true for cross-site NAT/RFC1918 layouts. That layout is auto-detected when the input directory has configs in two or more immediate subdirectories; to force site_scoping off, pass -c with an explicit site_scoping:false entry.",
+        "removed_file": "phase5_scenarios_config.json",
+        "superseded_by": "site_scoping auto-detection in convert.py"
+    }
+}

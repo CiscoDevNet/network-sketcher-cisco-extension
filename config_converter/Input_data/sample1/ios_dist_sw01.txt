@@ -1,0 +1,53 @@
+Building configuration...
+
+Current configuration : 2987 bytes
+!
+version 15.2
+service timestamps debug datetime msec
+service timestamps log datetime msec
+no service password-encryption
+!
+hostname DIST-SW01
+!
+boot-start-marker
+boot-end-marker
+!
+ip cef
+no ipv6 cef
+!
+vlan 10
+ name USERS
+!
+vlan 99
+ name NATIVE
+!
+interface GigabitEthernet0/1
+ description Link to CORE-RTR01 Gi0/1
+ no switchport
+ ip address 10.255.255.2 255.255.255.252
+ no shutdown
+!
+interface GigabitEthernet0/2
+ description Trunk to ACCESS-SW01 Gi0/1
+ switchport trunk encapsulation dot1q
+ switchport trunk native vlan 99
+ switchport trunk allowed vlan 10,99
+ switchport mode trunk
+ no shutdown
+!
+interface Vlan10
+ description Users VLAN10 SVI - HSRP Active
+ ip address 10.10.10.2 255.255.255.0
+ standby 1 ip 10.10.10.1
+ standby 1 priority 110
+ standby 1 preempt
+!
+router ospf 1
+ network 10.10.10.0 0.0.0.255 area 0
+ network 10.255.255.0 0.0.0.3 area 0
+!
+line con 0
+line vty 0 4
+ login
+!
+end

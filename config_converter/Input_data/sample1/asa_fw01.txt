@@ -1,0 +1,39 @@
+: Saved
+:
+ASA Version 9.18(3)
+!
+hostname ASA-FW01
+!
+interface GigabitEthernet0/0
+ nameif outside
+ security-level 0
+ ip address 203.0.113.13 255.255.255.252
+!
+interface GigabitEthernet0/1
+ nameif inside
+ security-level 100
+ ip address 10.40.40.1 255.255.255.0
+!
+interface GigabitEthernet0/2
+ shutdown
+ no nameif
+!
+object network INSIDE-NET
+ subnet 10.40.40.0 255.255.255.0
+object network DMZ-SERVER1
+ host 10.40.40.5
+!
+access-list OUTSIDE-IN extended deny ip any any
+access-list INSIDE-OUT extended permit ip any any
+!
+access-group OUTSIDE-IN in interface outside
+access-group INSIDE-OUT in interface inside
+!
+nat (inside,outside) source dynamic INSIDE-NET interface
+!
+same-security-traffic permit inter-interface
+!
+router bgp 65030
+ neighbor 203.0.113.14 remote-as 65099
+!
+end

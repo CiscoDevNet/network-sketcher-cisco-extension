@@ -33,9 +33,9 @@ fetch** that pulls the model straight from the platform into that file; the
 others read a file you export from the platform.
 
 All tools are standalone Python CLIs. Most run on the Python standard library
-alone — `cml_converter` needs `PyYAML` and `netbox_converter` needs `networkx`;
-see each tool's folder `README.md` for its exact Python version and
-dependencies.
+alone — `cml_converter` needs `PyYAML`, `config_converter` and
+`netbox_converter` need `networkx`; see each tool's folder `README.md` for its
+exact Python version and dependencies.
 
 ---
 
@@ -53,6 +53,7 @@ to each. Tools are listed alphabetically.
 | Catalyst Center | [`catc_converter`](./catc_converter/) | Convert an SD-Access campus into two diagrams: the physical **underlay** (core/distribution/access) and the logical **overlay** (Virtual Network / anycast gateway). | Catalyst Center model via read-only Intent REST API (`fetch_from_catc`) → JSON | ✅ Available |
 | Catalyst SD-WAN | — | Catalyst SD-WAN (formerly Cisco SD-WAN / Viptela) → Network Sketcher | — | 📋 Planning |
 | Cisco Modeling Labs (CML) | [`cml_converter`](./cml_converter/) | Convert a CML topology YAML (+ embedded running-configs) into Network Sketcher commands | CML lab YAML (local file) | ✅ Available |
+| IOS / IOS-XE / NX-OS / IOS-XR / ASA | [`config_converter`](./config_converter/) | Reconstruct L1/L2/L3 from `show running-config` text files (subnet-based topology inference; no live device connection). | Running-config text files (local directory) | ✅ Available |
 | Cyber Vision | [`cv_converter`](./cv_converter/) | Build an OT topology (Purdue / IEC 62443 / CPwE zones) from Cyber Vision asset + activity exports. | Cisco Cyber Vision networkNodes + activities CSV (local files) | ✅ Available |
 | Meraki | [`meraki_converter`](./meraki_converter/) | Convert a Meraki organization into a Network Sketcher command script reconstructing L1/L2/L3. | Meraki org via read-only Dashboard API v1 (`fetch_from_meraki`) → JSON | ✅ Available |
 | Nexus Dashboard | [`nd_converter`](./nd_converter/) | Convert an NDFC VXLAN EVPN fabric into two diagrams: the physical **underlay** (leaf/spine/border) and the logical **overlay** (VRF / Network / anycast gateway). | NDFC model via read-only REST API (`fetch_from_nd`) → JSON | ✅ Available |
@@ -166,7 +167,22 @@ conversion time).
 
 ---
 
-## Tool 4 — `cv_converter`
+## Tool 4 — `config_converter`
+
+Reconstruct L1/L2/L3 from a directory of Cisco device **running-config**
+text files (`show running-config` output — IOS, IOS-XE, NX-OS, IOS-XR, and
+ASA/FTD/FDM) into a ready-to-run Network Sketcher command script. Topology is
+**inferred** from IPv4 subnet matching (no CDP/LLDP or live device connection
+at conversion time) — treat the diagram as a starting reference and validate
+against authoritative sources.
+
+> **Full documentation** (installation, usage, supported platforms, subnet
+> matching and layout options, bundled sample data, output artefacts, known
+> issues) is in [`config_converter/README.md`](./config_converter/).
+
+---
+
+## Tool 5 — `cv_converter`
 
 Build an **OT network topology** from Cisco Cyber Vision asset (`networkNodes`)
 and `activities` CSV exports, laid out along the **Purdue model / IEC 62443 /
@@ -189,7 +205,7 @@ files.
 
 ---
 
-## Tool 5 — `meraki_converter`
+## Tool 6 — `meraki_converter`
 
 Convert a Cisco Meraki organization into a ready-to-run Network Sketcher
 command script (L1/L2/L3) — from a model pulled over the **read-only Meraki
@@ -209,7 +225,7 @@ offline (e.g. after a DevNet Sandbox reservation expires).
 
 ---
 
-## Tool 6 — `nd_converter`
+## Tool 7 — `nd_converter`
 
 Convert a Cisco Nexus Dashboard (NDFC / Fabric Controller) NX-OS VXLAN EVPN
 fabric into two Network Sketcher diagrams — the physical **underlay**
@@ -229,7 +245,7 @@ its **read-only REST API** (`fetch_from_nd`).
 
 ---
 
-## Tool 7 — `sna_converter`
+## Tool 8 — `sna_converter`
 
 Reconstruct a multi-site L1/L2/L3 topology **plus endpoints** from observed
 **traffic** instead of a device inventory: `sna_converter` reads a Cisco Secure
@@ -288,10 +304,11 @@ network-sketcher-cisco-extension/
 ├── aci_converter/       ← Tool 1: ACI fabric (REST API) → underlay + overlay
 ├── catc_converter/      ← Tool 2: Catalyst Center (REST API) → underlay + overlay
 ├── cml_converter/       ← Tool 3: CML YAML → L1/L2/L3
-├── cv_converter/        ← Tool 4: Cyber Vision CSV → OT (Purdue / IEC 62443)
-├── meraki_converter/    ← Tool 5: Meraki org (Dashboard API) → L1/L2/L3
-├── nd_converter/        ← Tool 6: Nexus Dashboard / NDFC (REST API) → underlay + overlay
-├── sna_converter/       ← Tool 7: SNA / NetFlow CSV → commands + [FLOW] matrix
+├── config_converter/    ← Tool 4: running-config text → L1/L2/L3 (inferred)
+├── cv_converter/        ← Tool 5: Cyber Vision CSV → OT (Purdue / IEC 62443)
+├── meraki_converter/    ← Tool 6: Meraki org (Dashboard API) → L1/L2/L3
+├── nd_converter/        ← Tool 7: Nexus Dashboard / NDFC (REST API) → underlay + overlay
+├── sna_converter/       ← Tool 8: SNA / NetFlow CSV → commands + [FLOW] matrix
 ├── template_converter/  ← scaffold for building new converters (contributor tooling)
 └── 3rd_party/           ← community / third-party converters (non-Cisco platforms)
     └── netbox_converter/  ← NetBox (REST API) → L1/L2/L3
@@ -324,6 +341,9 @@ the others.
   `catc_converter`.
 - [Cisco Modeling Labs](https://developer.cisco.com/modeling-labs/) — the
   network simulation platform used as the data source for `cml_converter`.
+- Cisco IOS / IOS-XE / NX-OS / IOS-XR / ASA running-config exports — the
+  local text files that feed `config_converter` (subnet-inferred topology; no
+  platform API at conversion time).
 - [Cisco Cyber Vision](https://www.cisco.com/site/us/en/products/security/industrial-security/cyber-vision/index.html)
   — the OT/ICS visibility platform whose asset + activity exports feed `cv_converter`.
 - [Cisco Meraki](https://meraki.cisco.com/) — the cloud-managed networking

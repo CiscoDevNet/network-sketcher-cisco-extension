@@ -1,0 +1,46 @@
+!! IOS XR Configuration 7.9.2
+!! Last configuration change at Tue Jul  7 09:30:00 2026
+!
+hostname EDGE-XR01
+!
+vrf MGMT
+ address-family ipv4 unicast
+ !
+!
+ipv4 access-list SAMPLE-ACL
+ 10 permit tcp any any established
+ 20 deny ipv4 any any
+!
+interface Bundle-Ether1
+ description LAG uplink toward CORE-RTR01 (no known peer in this sample)
+ ipv4 address 10.255.255.20 255.255.255.252
+ no shutdown
+!
+interface GigabitEthernet0/0/0/0
+ description Bundle-Ether1 member 1
+ bundle id 1 mode active
+ no shutdown
+!
+interface GigabitEthernet0/0/0/1
+ description Bundle-Ether1 member 2
+ bundle id 1 mode active
+ no shutdown
+!
+interface GigabitEthernet0/0/0/2
+ description WAN hand-off (TEST-NET-3)
+ ipv4 address 203.0.113.9 255.255.255.252
+ ipv4 access-group SAMPLE-ACL ingress
+ no shutdown
+!
+interface MgmtEth0/RP0/CPU0/0
+ description Out-of-band management
+ vrf MGMT
+ ipv4 address 192.0.2.70 255.255.255.0
+ no shutdown
+!
+router bgp 65020
+ neighbor 203.0.113.10
+  remote-as 65099
+ !
+!
+end

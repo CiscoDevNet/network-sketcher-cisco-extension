@@ -1,0 +1,33 @@
+# config_converter dependencies.
+#
+# Baseline (Phase 1, per DESIGN.md section 4.1/4.2): stdlib —
+#   argparse, csv, ipaddress, json, pathlib, re, sys, dataclasses, typing,
+#   collections
+#
+# Required third-party dependency (confirmed decision, see DESIGN.md
+# section 8.3 decision 9 and sections 4.3.4/4.4):
+networkx>=3.0
+# Used for BOTH:
+#   (a) requirement D's tier/area layout, ported from
+#       3rd_party/netbox_converter/src/netbox_layout.py (connected_components /
+#       degree_centrality / neighbors), and
+#   (b) requirement C's k>=3 (and flagged k==2) shared-subnet resolution,
+#       where the Blossom algorithm (networkx.algorithms.matching.min_weight_matching)
+#       is the default and preferred matching_algorithm (see
+#       config_converter_to_ns_config.json). A stdlib-only brute-force fallback
+#       remains available (matching_algorithm="brute_force") for environments
+#       where networkx cannot be installed, but it is no longer the default.
+# Version pin matches the existing precedent in
+# 3rd_party/netbox_converter/requirements.txt.
+
+# Optional third-party dependency (confirmed decision, see DESIGN.md
+# section 8.3 decision 10 and section 4.2.2):
+# ciscoconfparse2>=0.7.0   # OPTIONAL soft dependency, same as cml_converter's
+#                          # config_parser.py (see its `_HAVE_CCP` flag):
+#                          # improves hostname/VLAN/VRF/ACL/object-group parsing
+#                          # accuracy when installed, but config_parser.py must
+#                          # keep working (via its own regex fallback) without
+#                          # it. Version pin matches cml_converter/requirements.txt.
+#
+# Do not add any other third-party dependency without documenting why here,
+# per template_converter/GUIDE.md's "stdlib unless truly necessary" rule.

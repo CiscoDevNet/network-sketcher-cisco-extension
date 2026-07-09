@@ -1,0 +1,66 @@
+Building configuration...
+
+Current configuration : 2456 bytes
+!
+version 15.2
+service timestamps debug datetime msec
+service timestamps log datetime msec
+no service password-encryption
+!
+hostname ACCESS-SW01
+!
+boot-start-marker
+boot-end-marker
+!
+class-map match-any GUEST-TRAFFIC
+ match any
+!
+policy-map LIMIT-GUEST-IN
+ class GUEST-TRAFFIC
+  police 2000000 conform-action transmit exceed-action drop
+!
+vlan 10
+ name USERS
+!
+vlan 20
+ name GUEST
+!
+vlan 99
+ name NATIVE
+!
+interface GigabitEthernet0/1
+ description Trunk to DIST-SW01 Gi0/2
+ switchport trunk encapsulation dot1q
+ switchport trunk native vlan 99
+ switchport trunk allowed vlan 10,20,99
+ switchport mode trunk
+ no shutdown
+!
+interface FastEthernet0/1
+ description User PC port
+ switchport mode access
+ switchport access vlan 10
+ no shutdown
+!
+interface FastEthernet0/2
+ description Guest Wi-Fi AP uplink
+ switchport mode access
+ switchport access vlan 20
+ service-policy input LIMIT-GUEST-IN
+ no shutdown
+!
+interface FastEthernet0/24
+ description Spare - disabled
+ switchport mode access
+ switchport access vlan 20
+ shutdown
+!
+interface Vlan10
+ description Mgmt/uplink SVI - shares USERS subnet with distribution HSRP pair
+ ip address 10.10.10.10 255.255.255.0
+!
+line con 0
+line vty 0 4
+ login
+!
+end

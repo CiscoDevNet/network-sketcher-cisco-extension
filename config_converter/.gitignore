@@ -1,0 +1,53 @@
+# Based on template_converter/.gitignore — see
+# template_converter/GUIDE.md "Input_data/Output_data/.gitignore convention".
+
+# Generated output (kept out of version control)
+Output_data/*
+!Output_data/.gitkeep
+
+# Input configs are site/org-specific; don't commit real device data.
+# List EVERY bundled sample file explicitly as an exception — do not
+# whitelist a whole pattern (see GUIDE.md section 4). config_converter's
+# Input_data ships a small synthetic lab (RFC 5737 / RFC 1918 documentation
+# addressing only, no real device data) — update this list if the sample
+# filenames change.
+Input_data/*
+!Input_data/.gitkeep
+!Input_data/README.md
+!Input_data/sample1/
+!Input_data/sample1/README.md
+!Input_data/sample1/ios_access_sw01.txt
+!Input_data/sample1/ios_core_rtr01.txt
+!Input_data/sample1/ios_dist_sw01.txt
+!Input_data/sample1/iosxe_dist_sw02_edge_rtr03.txt
+!Input_data/sample1/iosxr_edge01.txt
+!Input_data/sample1/nxos_core01.txt
+!Input_data/sample1/asa_fw01.txt
+
+# Generated artifacts if ever written next to the script
+ns_commands*.txt
+ns_model_config.json
+config_inventory.csv
+config_report.md
+*_config.txt
+\[MASTER\]*.nsm
+\[L1_DIAGRAM\]*
+\[L2_DIAGRAM\]*
+\[L3_DIAGRAM\]*
+\[L1L2L3_DIAGRAM\]*
+\[DEVICE_TABLE\]*
+\[AI_Context\]*
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.env
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

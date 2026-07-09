@@ -1,0 +1,60 @@
+!Command: show running-config
+!Running configuration last done at: Tue Jul  7 09:00:00 2026
+!Time: Tue Jul  7 09:00:05 2026
+
+version 9.3(5) Bios:version 05.33
+feature interface-vlan
+feature hsrp
+feature bgp
+feature lacp
+
+hostname NXOS-CORE01
+
+vrf context MGMT
+
+ip access-list MGMT-IN
+  10 permit tcp any any established
+  20 deny ip any any
+
+vlan 1,10,30
+
+interface Vlan10
+  description Users VLAN10 SVI - additional L3 member on the DIST-SW01/DIST-SW02/ACCESS-SW01 subnet
+  no shutdown
+  ip address 10.10.10.4/24
+
+interface Vlan30
+  description Data Center Server Farm SVI - HSRP active (NX-OS nested hsrp syntax)
+  no shutdown
+  ip address 10.30.30.2/24
+  hsrp 30
+    ip 10.30.30.1
+    priority 110
+    preempt
+
+interface Ethernet1/1
+  description Spare uplink port, not yet connected to any known peer in this sample
+  no switchport
+  ip address 198.51.100.9/30
+  no shutdown
+
+interface Ethernet1/2
+  description Unused access port
+  switchport
+  switchport mode access
+  switchport access vlan 10
+  shutdown
+
+interface mgmt0
+  description Out-of-band management
+  vrf member MGMT
+  ip address 192.0.2.60/24
+  no shutdown
+
+router bgp 65010
+  neighbor 198.51.100.10 remote-as 65099
+
+line console
+line vty
+
+end

@@ -1,0 +1,72 @@
+Building configuration...
+
+Current configuration : 3421 bytes
+!
+version 15.2
+service timestamps debug datetime msec
+service timestamps log datetime msec
+no service password-encryption
+!
+hostname CORE-RTR01
+!
+boot-start-marker
+boot-end-marker
+!
+no aaa new-model
+!
+ip cef
+no ipv6 cef
+!
+ip access-list standard NAT-ACL
+ permit 10.0.0.0 0.255.255.255
+!
+ip access-list extended WAN-IN
+ remark Allow return traffic and basic ICMP from the ISP side
+ permit tcp any any established
+ permit icmp any any echo-reply
+ permit udp any eq 123 any
+!
+class-map match-any WAN-EGRESS
+ match any
+!
+policy-map WAN-SHAPE-OUT
+ class WAN-EGRESS
+  shape average 10000000
+!
+interface Loopback0
+ description Router-ID / management loopback
+ ip address 192.0.2.1 255.255.255.255
+!
+interface GigabitEthernet0/0
+ description WAN Link to ISP - Circuit ID ABC-123-XYZ
+ ip address 203.0.113.1 255.255.255.252
+ ip nat outside
+ ip access-group WAN-IN in
+ service-policy output WAN-SHAPE-OUT
+ no shutdown
+!
+interface GigabitEthernet0/1
+ description Link to DIST-SW01 Gi0/1
+ ip address 10.255.255.1 255.255.255.252
+ ip nat inside
+ no shutdown
+!
+interface GigabitEthernet0/2
+ description Unused - spare port
+ no ip address
+ shutdown
+!
+router bgp 65001
+ bgp log-neighbor-changes
+ neighbor 203.0.113.2 remote-as 64512
+ neighbor 203.0.113.2 description ISP-EDGE
+ network 192.0.2.1 mask 255.255.255.255
+!
+ip nat inside source list NAT-ACL interface GigabitEthernet0/0 overload
+ip route 0.0.0.0 0.0.0.0 GigabitEthernet0/0
+!
+line con 0
+line vty 0 4
+ login
+!
+end

@@ -6,7 +6,8 @@ this repository.
 **What this project is:** `network-sketcher-cisco-extension` is a monorepo of standalone Python CLIs
 that turn Cisco platform data into [Network Sketcher](https://github.com/cisco-open/network-sketcher)
 CLI command scripts, so an L1/L2/L3 topology can be rebuilt automatically. Each tool lives in its own
-sub-directory (`aci_converter/`, `cml_converter/`, `cv_converter/`, `sna_converter/`) with its own
+sub-directory (`aci_converter/`, `cml_converter/`, `config_converter/`, `cv_converter/`,
+`sna_converter/`, …) with its own
 `README.md` and `requirements.txt`, and can be used independently. **Conversion runs entirely on local
 files** — no live platform connection is needed at conversion time. Always read the root `README.md`
 and the relevant tool's `README.md` before making changes.
@@ -15,7 +16,8 @@ and the relevant tool's `README.md` before making changes.
 
 - **Python version**: Use Python 3.10+ (works for all tools). `cv_converter` and `sna_converter` also
   run on 3.8+. `aci_converter`, `cv_converter`, and `sna_converter` use the **standard library only**;
-  `cml_converter` needs `PyYAML` (optionally `ciscoconfparse2`).
+  `cml_converter` needs `PyYAML` (optionally `ciscoconfparse2`); `config_converter` needs
+  `networkx` (optionally `ciscoconfparse2`).
 - **Virtual env (recommended)**:
   ```bash
   python3 -m venv .venv
@@ -26,7 +28,8 @@ and the relevant tool's `README.md` before making changes.
   ```bash
   pip install -r cml_converter/requirements.txt   # PyYAML (+ optional ciscoconfparse2)
   pip install -r aci_converter/requirements.txt   # no-op (stdlib only)
-  ```
+  pip install -r config_converter/requirements.txt   # networkx (+ optional ciscoconfparse2)
+```
 
 ### Quick run examples
 
@@ -38,6 +41,11 @@ python -m aci_converter.src.convert \
 
 # cml_converter — convert a CML lab YAML (+ embedded running-configs) into NS commands
 python -m cml_converter.src.convert --yaml /path/to/your_lab.yaml --out /tmp/ns_commands.txt
+
+# config_converter — reconstruct L1/L2/L3 from Cisco running-config text files
+python -m config_converter.src.convert \
+    -i config_converter/Input_data/sample1/ \
+    -o config_converter/Output_data/ns_commands.txt
 
 # cv_converter — build an OT (Purdue/IEC 62443) topology from Cyber Vision CSV exports
 cd cv_converter && python cv_to_ns_commands.py            # auto-detects CSVs in Input_data/
@@ -52,7 +60,8 @@ are phase comments) plus supporting reports/CSVs into that tool's `Output_data/`
 ## Testing instructions
 
 - **No automated test suite yet.** Validate changes by running the affected tool against a bundled
-  sample (`aci_converter/Input_data/sample_export.json`, `sna_converter/Input_data/sample_flows.csv`)
+  sample (`aci_converter/Input_data/sample_export.json`,
+  `config_converter/Input_data/sample1/`, `sna_converter/Input_data/sample_flows.csv`)
   or your own export, and confirm the emitted `ns_commands.txt` and reports look correct.
 - **Run the output in Network Sketcher (MCP server).** The generated commands are meant to be executed
   against a Network Sketcher master file. If a `network-sketcher` MCP server is available, use it to

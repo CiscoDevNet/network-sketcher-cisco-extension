@@ -1,0 +1,72 @@
+Building configuration...
+
+Current configuration : 2678 bytes
+!
+version 16.9
+service timestamps debug datetime msec
+service timestamps log datetime msec
+no service password-encryption
+platform qos utilization interval 1000
+!
+boot-start-marker
+boot-end-marker
+!
+hostname DIST-SW02
+!
+vlan 10
+ name USERS
+!
+vlan 99
+ name NATIVE
+!
+interface GigabitEthernet0/1
+ description Trunk to ACCESS-SW01 (redundant uplink, not cabled in this sample)
+ switchport trunk encapsulation dot1q
+ switchport trunk native vlan 99
+ switchport trunk allowed vlan 10,99
+ switchport mode trunk
+ shutdown
+!
+interface Vlan10
+ description Users VLAN10 SVI - HSRP Standby
+ ip address 10.10.10.3 255.255.255.0
+ standby 1 ip 10.10.10.1
+ standby 1 priority 90
+!
+router ospf 1
+ network 10.10.10.0 0.0.0.255 area 0
+!
+line con 0
+line vty 0 4
+ login
+!
+end
+Building configuration...
+
+Current configuration : 1987 bytes
+!
+version 17.3
+service timestamps debug datetime msec
+service timestamps log datetime msec
+no service password-encryption
+!
+boot-start-marker
+boot-end-marker
+!
+hostname EDGE-RTR03
+!
+interface GigabitEthernet1
+ description Backup WAN - MPLS Circuit (secondary ISP)
+ ip address 198.51.100.1 255.255.255.252
+ no shutdown
+!
+interface GigabitEthernet2
+ description LAN uplink - not yet connected to any known peer in this sample
+ ip address 172.16.30.1 255.255.255.252
+ no shutdown
+!
+line con 0
+line vty 0 4
+ login
+!
+end
