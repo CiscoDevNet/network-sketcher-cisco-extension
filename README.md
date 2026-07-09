@@ -9,6 +9,8 @@ hand.
 
 <img alt="image" src="https://github.com/user-attachments/assets/1dededa6-3d7d-4f7e-8606-c9dacd2684c1" />
 
+<img alt="image" src="https://github.com/user-attachments/assets/d6d9573e-e183-4dcf-96c1-2531a3c18e2f" />
+
 
 > [!IMPORTANT]
 > **The quality of each converted topology depends entirely on what data each
@@ -53,7 +55,7 @@ to each. Tools are listed alphabetically.
 | Catalyst Center | [`catc_converter`](./catc_converter/) | Convert an SD-Access campus into two diagrams: the physical **underlay** (core/distribution/access) and the logical **overlay** (Virtual Network / anycast gateway). | Catalyst Center model via read-only Intent REST API (`fetch_from_catc`) → JSON | ✅ Available |
 | Catalyst SD-WAN | — | Catalyst SD-WAN (formerly Cisco SD-WAN / Viptela) → Network Sketcher | — | 📋 Planning |
 | Cisco Modeling Labs (CML) | [`cml_converter`](./cml_converter/) | Convert a CML topology YAML (+ embedded running-configs) into Network Sketcher commands | CML lab YAML (local file) | ✅ Available |
-| IOS / IOS-XE / NX-OS / IOS-XR / ASA | [`config_converter`](./config_converter/) | Reconstruct L1/L2/L3 from `show running-config` text files (subnet-based topology inference; no live device connection). | Running-config text files (local directory) | ✅ Available |
+| Config files (IOS / IOS-XE / NX-OS / IOS-XR / ASA) | [`config_converter`](./config_converter/) | Reconstruct L1/L2/L3 from `show running-config` text files (subnet-based topology inference; no live device connection). | Running-config text files (local directory) | ✅ Available |
 | Cyber Vision | [`cv_converter`](./cv_converter/) | Build an OT topology (Purdue / IEC 62443 / CPwE zones) from Cyber Vision asset + activity exports. | Cisco Cyber Vision networkNodes + activities CSV (local files) | ✅ Available |
 | Meraki | [`meraki_converter`](./meraki_converter/) | Convert a Meraki organization into a Network Sketcher command script reconstructing L1/L2/L3. | Meraki org via read-only Dashboard API v1 (`fetch_from_meraki`) → JSON | ✅ Available |
 | Nexus Dashboard | [`nd_converter`](./nd_converter/) | Convert an NDFC VXLAN EVPN fabric into two diagrams: the physical **underlay** (leaf/spine/border) and the logical **overlay** (VRF / Network / anycast gateway). | NDFC model via read-only REST API (`fetch_from_nd`) → JSON | ✅ Available |
@@ -175,6 +177,11 @@ ASA/FTD/FDM) into a ready-to-run Network Sketcher command script. Topology is
 **inferred** from IPv4 subnet matching (no CDP/LLDP or live device connection
 at conversion time) — treat the diagram as a starting reference and validate
 against authoritative sources.
+
+<img alt="image" src="https://github.com/user-attachments/assets/9af782bf-2cb0-47d4-95c6-31329ca27492" />
+
+<img alt="image" src="https://github.com/user-attachments/assets/524ef563-0790-4a78-9063-3820a7af0872" />
+
 
 > **Full documentation** (installation, usage, supported platforms, subnet
 > matching and layout options, bundled sample data, output artefacts, known
