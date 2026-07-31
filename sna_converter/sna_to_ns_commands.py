@@ -29,7 +29,15 @@ Output (per input CSV, under Output_data/<csv name>/):
   - gen_master_commands.txt : Network Sketcher CLI command sequence
   - gen_flow_list.csv        : [FLOW] paste-ready CSV (Source/Dest = master device name, Max bandwidth Mbps)
   - out_of_scope_ips.csv     : server-candidate IPs that were not adopted (with reasons)
+  - network_device_evidence.csv : every host that emitted network-only traffic, with the
+                                  evidence, the confidence tier and what was done with it
   - _normalized_flow.csv     : intermediate normalized file for UI-format input
+
+Network-device detection:
+  Hosts that emit traffic only network gear produces (routing protocols, NetFlow export,
+  HSRP/GLBP, CAPWAP, BFD, ...) are OBSERVED, not inferred, so they are emitted as real
+  NWD_* devices with a network stencil and the green "observed" colour instead of being
+  mistaken for red application servers. See --netdev-confidence / sna_to_ns_config.json.
 
 Endpoint registration (RULE 11.5 compliant = no SVI / IP directly on the physical port):
   --endpoints {none,servers,clients,both}   (default both)
@@ -81,6 +89,9 @@ ap.add_argument("--endpoints", choices=["none","servers","clients","both"], defa
 ap.add_argument("--server-min-flows", type=int, default=1)
 ap.add_argument("--no-flow", action="store_true",
                 help="do not generate the [FLOW] paste-ready CSV (gen_flow_list.csv)")
+ap.add_argument("--netdev-confidence", choices=["off","certain","strong","medium"], default=None,
+                help="lowest confidence tier promoted to an observed network device "
+                     "(default: the netdev_min_confidence value in the config JSON)")
 ap.add_argument("--config", default=None,
                 help="path to the config JSON (default: sna_to_ns_config.json in the same folder as the script)")
 ap.add_argument("--outdir", default=None,
@@ -111,6 +122,7 @@ if single_file is None:
              "--server-min-flows", str(args.server_min_flows)]
         if args.config: cmd+=["--config", args.config]
         if args.no_flow: cmd.append("--no-flow")
+        if args.netdev_confidence: cmd+=["--netdev-confidence", args.netdev_confidence]
         print("\n[BATCH] ==> %s  ->  %s"%(cp, od))
         r=subprocess.run(cmd); rc=rc or r.returncode
     print("\n[BATCH] done (%d file(s))."%len(csvs)); sys.exit(rc)
@@ -167,18 +179,31 @@ def normalize_csv(path):
     OUTCOLS=["searchSubject.ipAddress","peer.ipAddress","peer.portProtocol.port",
              "searchSubject.portProtocol.protocol","peer.synAckPackets",
              "connection.transferBytes","activeDuration"]
+    # optional context columns, carried through only when the UI export contains them
+    # (they feed the network-device evidence, they are not required)
+    OPTCOLS=[("searchSubject.macVendor","Subject MAC Vendor"),
+             ("peer.macVendor","Peer MAC Vendor"),
+             ("searchSubject.hostGroups","Subject Host Groups"),
+             ("peer.hostGroups","Peer Host Groups")]
+    opt=[(api,ui) for api,ui in OPTCOLS if ui in ix]
+    # the UI protocol column is "Protocol"; older exports used lowercase, and FTP flows
+    # are reported as "TCP-FTP" rather than "TCP"
+    pcol="Protocol" if "Protocol" in ix else "protocol"
     with open(path,newline="",encoding="utf-8",errors="replace") as fh, \
          open(outp,"w",newline="",encoding="utf-8") as of:
-        r=csv.reader(fh); next(r); w=csv.writer(of); w.writerow(OUTCOLS)
+        r=csv.reader(fh); next(r); w=csv.writer(of)
+        w.writerow(OUTCOLS+[api for api,_ in opt])
         for v in r:
             if not v or not g(v,"Subject IP Address"): continue
             try: sa=int(g(v,"Peer SYN/ACK Packets").strip())
             except: sa=0
+            pr=(g(v,pcol) or "").upper().split("-")[0]
             w.writerow([g(v,"Subject IP Address"), g(v,"Peer IP Address"),
                         _parse_port(g(v,"Peer Port/Protocol")),
-                        (g(v,"protocol") or "").upper(), sa,
+                        pr, sa,
                         int(round(_parse_bytes(g(v,"Total Bytes")))),
-                        _parse_dur_ms(g(v,"Duration"))])
+                        _parse_dur_ms(g(v,"Duration"))]
+                       +[g(v,ui) for _,ui in opt])
     print("[INFO] UI-format CSV detected -> normalized:",outp)
     return outp
 CSV = normalize_csv(CSV)
@@ -305,6 +330,56 @@ KNOWN_HIGH={1433,1521,3306,3389,5432,5060,5061,8080,8443,8000,5989,5985,5986,
             1645,1812,1813,9100,52311,7778,10000,3268,3269,2049}
 def is_service(p): return p>0 and (p<1024 or p in KNOWN_HIGH)
 
+# ---------- network-device detection tables ----------
+# NetFlow tells us nothing about the device inventory, but a host that emits traffic only
+# network gear produces is OBSERVED evidence of a real router / switch / WLC. The matching
+# is deliberately strict: the protocol must match AND the port must be on the SERVER side
+# of the flow (peer.portProtocol.port), because a bare port-number match against the
+# ephemeral source port produces large numbers of false positives.
+ND_ROUTING_PROTO = {"OSPFIGP","OSPF","EIGRP","IGRP","PIM","VRRP","IDRP","GGP","ISIS"}
+ND_FLOW_EXPORT   = set(cfg("netflow_collector_ports",[2055,9995,9996,4739,6343,9991,9993]))
+ND_HSRP_PORTS    = {1985,3222}                    # HSRP / GLBP
+ND_HSRP_MCAST    = {"224.0.0.2","224.0.0.102"}    # HSRPv1 / HSRPv2 destination groups
+ND_BFD_PORTS     = {3784,3785,4784}
+ND_CAPWAP_PORTS  = {5246,5247}
+ND_BGP_PORTS     = {179,646}                      # BGP / LDP
+ND_AAA_UDP       = {1645,1646,1812,1813}          # RADIUS  (client side = network access device)
+ND_AAA_TCP       = {49}                           # TACACS+ (client side = network access device)
+ND_MGMT_SRC      = {514,162}                      # syslog / SNMP trap source
+ND_SNMP_PORTS    = {161}                          # SNMP-polled agent
+
+# evidence key -> confidence tier
+ND_EVIDENCE_TIER = {
+    "routing_protocol":"certain",  # IP-layer IGP seen from this host: only routers speak it
+    "netflow_export"  :"certain",  # exports NetFlow/sFlow/IPFIX to a collector
+    "hsrp_glbp"       :"certain",  # first-hop redundancy hello to the well-known group
+    "bfd"             :"certain",
+    "bgp_ldp"         :"certain",  # established TCP 179/646 session (SYN-ACK seen)
+    "capwap_ap"       :"certain",
+    "capwap_wlc"      :"certain",
+    "aaa_client"      :"strong",   # RADIUS client: usually a NAD, but NPS proxies also match
+    "tacacs_client"   :"strong",
+    "snmp_agent"      :"medium",   # SNMP-polled: network gear, but servers are polled too
+    "syslog_trap_src" :"medium",
+    "cisco_mac"       :"medium",   # Cisco OUI: also matches Cisco-branded servers/phones
+}
+ND_TIER_RANK = {"off":0,"medium":1,"strong":2,"certain":3}
+# evidence that identifies the host as a routed/redundancy speaker rather than a plain switch
+ND_ROUTER_EVIDENCE = {"routing_protocol","hsrp_glbp","bgp_ldp","bfd"}
+# evidence of IP forwarding without a routing protocol: flow export is a feature of the
+# routed data path, so such a host is at least a layer-3 switch
+ND_L3_EVIDENCE     = {"netflow_export"}
+ND_ROLE_STENCIL = {"Rtr":"Router","L3sw":"L3Switch","Sw":"Switch","WLC":"WLC","AP":"AP"}
+
+DETECT_ND   = bool(cfg("detect_network_devices", True))
+ND_MIN_CONF = (args.netdev_confidence or cfg("netdev_min_confidence","certain")).lower()
+if ND_MIN_CONF not in ND_TIER_RANK:
+    print("[WARN] unknown netdev_min_confidence %r -> using 'certain'"%ND_MIN_CONF)
+    ND_MIN_CONF="certain"
+if ND_MIN_CONF=="off": DETECT_ND=False
+ND_FORCE_IPS   = set(cfg("netdev_force_ips", []))
+ND_EXCLUDE_IPS = set(cfg("netdev_exclude_ips", []))
+
 # ---------- per /24 features + endpoint detection ----------
 class Sub:
     __slots__=("flows","bytes","octs","srv","cli","reg")
@@ -319,6 +394,10 @@ svc_bytes=collections.Counter()      # (proto,port) external service -> bytes
 svc_flows=collections.Counter()      # (proto,port) external service -> flows
 svc_ips=collections.defaultdict(set) # (proto,port) external service -> {server IP,...}
 seg_cli_hosts=collections.defaultdict(set)   # /24 segment -> {client (initiator) side host IP,...}
+nd_ev=collections.defaultdict(collections.Counter)   # host IP -> {evidence key: flows}
+nd_protos=collections.defaultdict(set)               # host IP -> {routing protocol name,...}
+nd_vendor={}                                         # host IP -> MAC vendor (when the export carries it)
+nd_groups={}                                         # host IP -> SNA host groups (when the export carries it)
 
 with open(CSV,newline="",encoding="utf-8",errors="replace") as fh:
     r=csv.reader(fh); cols=next(r); ix={c:i for i,c in enumerate(cols)}
@@ -328,7 +407,10 @@ with open(CSV,newline="",encoding="utf-8",errors="replace") as fh:
     PrS=ix["searchSubject.portProtocol.protocol"]        # L4 protocol of the flow
     pSA=ix["peer.synAckPackets"]                          # evidence that the server accepted the connection
     By=ix["connection.transferBytes"]
-    maxix=max(Sip,Pip,Pp,PrS,pSA,By)
+    # optional context columns: present in the full SNA API export, absent in minimal exports
+    sMV=ix.get("searchSubject.macVendor",-1); pMV=ix.get("peer.macVendor",-1)
+    sHG=ix.get("searchSubject.hostGroups",-1); pHG=ix.get("peer.hostGroups",-1)
+    maxix=max(Sip,Pip,Pp,PrS,pSA,By,sMV,pMV,sHG,pHG)
     for v in r:
         if len(v)<=maxix: continue
         sip=v[Sip];pip=v[Pip]                            # sip=client, pip=server
@@ -340,6 +422,27 @@ with open(CSV,newline="",encoding="utf-8",errors="replace") as fh:
         try: psa=int(v[pSA])
         except: psa=0
         ina,inb=is_inside(sip),is_inside(pip)
+        # ---- network-device evidence (see ND_* tables) ----
+        if DETECT_ND:
+            if proto in ND_ROUTING_PROTO:
+                nd_ev[sip]["routing_protocol"]+=1; nd_protos[sip].add(proto)
+            elif proto=="UDP":
+                if   sport in ND_FLOW_EXPORT:  nd_ev[sip]["netflow_export"]+=1
+                elif sport in ND_HSRP_PORTS and pip in ND_HSRP_MCAST: nd_ev[sip]["hsrp_glbp"]+=1
+                elif sport in ND_BFD_PORTS:    nd_ev[sip]["bfd"]+=1
+                elif sport in ND_CAPWAP_PORTS: nd_ev[sip]["capwap_ap"]+=1; nd_ev[pip]["capwap_wlc"]+=1
+                elif sport in ND_AAA_UDP:      nd_ev[sip]["aaa_client"]+=1
+                elif sport in ND_MGMT_SRC:     nd_ev[sip]["syslog_trap_src"]+=1
+                elif sport in ND_SNMP_PORTS:   nd_ev[pip]["snmp_agent"]+=1
+            elif proto=="TCP":
+                if   sport in ND_AAA_TCP:      nd_ev[sip]["tacacs_client"]+=1
+                elif sport in ND_BGP_PORTS and psa>0:
+                    nd_ev[sip]["bgp_ldp"]+=1; nd_ev[pip]["bgp_ldp"]+=1
+            for mi,gi,ip in ((sMV,sHG,sip),(pMV,pHG,pip)):
+                if mi>=0 and v[mi]:
+                    nd_vendor.setdefault(ip,v[mi])
+                    if "cisco" in v[mi].lower(): nd_ev[ip]["cisco_mac"]+=1
+                if gi>=0 and v[gi]: nd_groups.setdefault(ip,v[gi])
         # inter-region matrix (internal-internal)
         if ina and inb:
             ra,rb=reg16(sip),reg16(pip)
@@ -379,7 +482,49 @@ with open(CSV,newline="",encoding="utf-8",errors="replace") as fh:
             try: e.octs.add(int(pip.split(".")[3]))
             except: pass
 
-adopted={k:e for k,e in sub.items() if e.flows>=THRESH}
+# ---------- network-device verdicts ----------
+# Every host with any evidence is kept for the audit CSV; only hosts at or above the
+# configured confidence tier (and inside the organization) become real devices.
+def nd_role_of(ip,ev):
+    if "capwap_wlc" in ev: return "WLC"
+    if "capwap_ap"  in ev: return "AP"
+    if ND_ROUTER_EVIDENCE & set(ev): return "Rtr"
+    if ND_L3_EVIDENCE & set(ev): return "L3sw"
+    return "L3sw" if last_oct(ip) in (1,254) else "Sw"
+NETDEV={}        # ip -> {tier, role, stencil, evidence, promote, disposition, ...}
+for ip in set(nd_ev)|(ND_FORCE_IPS if DETECT_ND else set()):
+    ev=nd_ev.get(ip,collections.Counter())
+    if ip in ND_FORCE_IPS:
+        tier="certain"
+    else:
+        tier=max((ND_EVIDENCE_TIER[k] for k in ev if k in ND_EVIDENCE_TIER),
+                 key=lambda t:ND_TIER_RANK[t], default=None)
+    if tier is None: continue
+    promote=True; why=""
+    if ip in ND_EXCLUDE_IPS:                            promote,why=False,"excluded_by_config"
+    elif ND_TIER_RANK[tier]<ND_TIER_RANK[ND_MIN_CONF]:  promote,why=False,"below_min_confidence"
+    elif not is_inside(ip):                             promote,why=False,"outside_host"
+    role=nd_role_of(ip,ev)
+    NETDEV[ip]={"tier":tier,"role":role,"stencil":ND_ROLE_STENCIL[role],
+                "ev":ev,"protos":nd_protos.get(ip,set()),
+                "promote":promote,"disposition":why or "pending"}
+nd_promote=set(ip for ip,d in NETDEV.items() if d["promote"])
+
+# A confirmed network device is worth drawing even when its /24 saw too little traffic to
+# be adopted on its own, so force-adopt those segments (they already exist in `sub`).
+nd_segs=set(k24(ip) for ip in nd_promote if k24(ip) in sub)
+adopted={k:e for k,e in sub.items() if e.flows>=THRESH or k in nd_segs}
+for ip in sorted(nd_promote):
+    if k24(ip) not in adopted:
+        NETDEV[ip]["promote"]=False; NETDEV[ip]["disposition"]="segment_not_observed"
+nd_promote=set(ip for ip,d in NETDEV.items() if d["promote"])
+
+# The synthetic site SVI normally takes x.y.z.1, but that address may belong to an
+# observed network device. Observed data wins; the synthetic SVI moves out of the way.
+def svi_host(k):
+    for h in (1,254,253,252):
+        if "%s.%d"%(k,h) not in nd_promote: return h
+    return 1
 
 # ---------- region features ----------
 reg_members=collections.defaultdict(list)
@@ -518,51 +663,70 @@ def site_access(site):
     c=code(site)
     return (c+"-Acc1") if site in client_set else (c+"-Core")
 
-servers=[]   # (name, ip, vlanname, site)
+servers=[]   # (name, ip, vlanname, site) -- observed network devices share this list
 srv_meta={}  # ip -> (max_port_bytes, total_bytes, top_port, distinct_clients)  (for out-of-scope records)
 oos=[]       # out-of-scope: (ip, region, reason, max_port_bytes, total_bytes, top_port, distinct_clients)
 n_cand=0     # number of server-candidate IPs by orientation
-if DO_SRV:
-    per=collections.Counter()   # (site, port-label) -> sequence number
-    cand=sorted(ports_bytes.keys(),
-                key=lambda ip:(-sum(ports_bytes[ip].values()), ip))
+nd_ports={}  # confirmed network device ip -> its service ports (recorded for the evidence CSV)
+if DO_SRV or nd_promote:
+    per=collections.Counter()      # (site, port-label) -> sequence number
+    nd_per=collections.Counter()   # (site, role)       -> sequence number
+    cand=sorted((set(ports_bytes) if DO_SRV else set())|nd_promote,
+                key=lambda ip:(-sum(ports_bytes.get(ip,{}).values()), ip))
     for ip in cand:
-        n_cand+=1
-        pb=ports_bytes[ip]
+        is_nd = ip in nd_promote
+        if ip in ports_bytes: n_cand+=1
+        pb=ports_bytes.get(ip,{})
         tot=int(sum(pb.values())); mx=int(max(pb.values()) if pb else 0)
         topp=max(pb.items(),key=lambda x:x[1])[0] if pb else -1
         ncl=len(srv_ip_clients.get(ip,()))
         # adopt only real service ports above the bytes threshold (+ optional flow floor MINF)
         qports=sorted(p for p,b in pb.items()
                       if b>=SRV_MIN_BYTES and ports_flows[ip][p]>=MINF)
-        if not qports:
+        # A confirmed network device is observed fact, so it bypasses the server heuristics:
+        # it needs no service port, and owning the .1 gateway address is expected, not a reason
+        # to drop it.
+        if not qports and not is_nd:
             oos.append((ip,reg16(ip),"below_traffic_threshold",mx,tot,topp,ncl)); continue
         seg=k24(ip)
-        if seg not in adopted or last_oct(ip)==1:
-            oos.append((ip,reg16(ip),"segment_not_adopted_or_gateway",mx,tot,topp,ncl)); continue
+        if seg not in adopted or (last_oct(ip)==1 and not is_nd):
+            if is_nd: NETDEV[ip]["disposition"]="segment_not_adopted"
+            else: oos.append((ip,reg16(ip),"segment_not_adopted_or_gateway",mx,tot,topp,ncl))
+            continue
         site=site_of_sub.get(seg) or region_site.get(reg16(ip))
-        plabel="-".join(str(p) for p in qports)
-        per[(site,plabel)]+=1
-        servers.append(("SRV_%s_%s_%d"%(acode[site],plabel,per[(site,plabel)]),
-                        ip, "Vlan%d"%seg_vlan[seg], site))
+        if is_nd:
+            role=NETDEV[ip]["role"]; nd_per[(site,role)]+=1
+            name="NWD_%s_%s_%d"%(acode[site],role,nd_per[(site,role)])
+            nd_ports[ip]=qports
+            NETDEV[ip].update(name=name,site=site,disposition="emitted")
+        else:
+            plabel="-".join(str(p) for p in qports)
+            per[(site,plabel)]+=1
+            name="SRV_%s_%s_%d"%(acode[site],plabel,per[(site,plabel)])
+        servers.append((name, ip, "Vlan%d"%seg_vlan[seg], site))
         srv_meta[ip]=(mx,tot,topp,ncl)
+
+nd_promote=set(ip for ip,d in NETDEV.items() if d.get("disposition")=="emitted")
 
 # ---------- segment classification (server-segment vs client-segment) ----------
 # When servers and clients are mixed in the same /24 segment, assign it to "whichever has more hosts".
 #   server-segment : adopted server count > client-only host count
 #   client-segment : otherwise (client >= server, or zero servers)
 # server-segment generates the server group (separated under a FW later); client-segment generates one PC.
+# Network devices take no part in this vote: a router living in a user VLAN does not turn it
+# into a server segment.
 seg_srv_hosts=collections.defaultdict(set)
-for nm,ip,vn,st in servers: seg_srv_hosts[k24(ip)].add(ip)
+for nm,ip,vn,st in servers:
+    if ip not in nd_promote: seg_srv_hosts[k24(ip)].add(ip)
 def _seg_is_server(seg):
     ns=len(seg_srv_hosts.get(seg,()))
-    nc=len(seg_cli_hosts.get(seg,set())-seg_srv_hosts.get(seg,set()))
+    nc=len(seg_cli_hosts.get(seg,set())-seg_srv_hosts.get(seg,set())-nd_promote)
     return ns>0 and ns>nc
 server_seg=set(k for k in adopted if _seg_is_server(k))
 # move server candidates that were in a client-majority segment to out-of-scope (not separated)
 kept=[]
 for nm,ip,vn,st in servers:
-    if k24(ip) in server_seg: kept.append((nm,ip,vn,st))
+    if k24(ip) in server_seg or ip in nd_promote: kept.append((nm,ip,vn,st))
     else:
         mx,tot,topp,ncl=srv_meta.get(ip,(0,0,-1,0))
         oos.append((ip,reg16(ip),"client_majority_segment",mx,tot,topp,ncl))
@@ -576,8 +740,9 @@ if DO_CLI:
         for k,e,vl in site_svis[s]:
             if k in server_seg: continue          # do not create a PC for a server-segment
             if e.cli<=0: continue                 # exclude segments with no client activity
+            n_cli_ips=len(seg_cli_hosts.get(k,set())-nd_promote)
+            if n_cli_ips<=0: continue             # only network devices here: no PC segment
             per[s]+=1
-            n_cli_ips=len(seg_cli_hosts.get(k,()))
             nm="PC_%s_%d_%d"%(acode[s],n_cli_ips,per[s])
             pcs.append((nm, "Vlan%d"%vl, s)); pc_name_by_seg[k]=nm
 
@@ -595,7 +760,8 @@ if DO_SRV:
         svcs.append(("Svc_%s%d_%d"%(proto,port,n_ips), proto, port, fl))
 
 # ---------- server/PC separation helpers (FW between server & client segments) ----------
-srv_sites=set(st for nm,ip,vn,st in servers)
+# Network devices do not make a site "mixed": the FW-separated server band is about servers.
+srv_sites=set(st for nm,ip,vn,st in servers if ip not in nd_promote)
 pc_sites =set(st for nm,vn,st in pcs)
 def site_mixed(s):
     # a client site where a server segment and a client segment coexist in the same area
@@ -642,7 +808,10 @@ cmds.append('add area_location "%s"'%dq(grid))
 
 # 2) device_location (infra + endpoints at bottom)
 def eps_of(site):
-    return [nm for nm,ip,vn,st in servers if st==site]+[nm for nm,vn,st in pcs if st==site]
+    # observed network devices first, then servers, then PC segments
+    return ([nm for nm,ip,vn,st in servers if st==site and ip in nd_promote]
+           +[nm for nm,ip,vn,st in servers if st==site and ip not in nd_promote]
+           +[nm for nm,vn,st in pcs if st==site])
 for s in dc_sites:
     c=code(s); rows=[["%s-FW"%c],["%s-Core"%c]]+wrap(eps_of(s),EP_ROW_WIDTH)
     cmds.append('add device_location "%s"'%dq([s,rows]))
@@ -753,7 +922,7 @@ for s in dc_sites:
     svis=[]; binds=[]; ips=[]
     for k,e,vl in site_svis[s]:
         svis.append("Vlan %d"%vl); binds.append([core,"Vlan %d"%vl,["Vlan%d"%vl]])
-        ips.append([core,"Vlan %d"%vl,[k+".1/24"]])
+        ips.append([core,"Vlan %d"%vl,["%s.%d/24"%(k,svi_host(k))]])
     cmds.append('add virtual_port_bulk "%s"'%dq([[core,svis]]))
     cmds.append('add l2_segment_bulk "%s"'%dq(binds))
     cmds.append('add ip_address_bulk "%s"'%dq(ips))
@@ -769,7 +938,7 @@ for s in client_sites:
     csvis=[]; cbinds=[]; cips=[]; cvn=[]
     for k,e,vl in cli_segs:
         csvis.append("Vlan %d"%vl); cbinds.append([core,"Vlan %d"%vl,["Vlan%d"%vl]])
-        cvn.append("Vlan%d"%vl); cips.append([core,"Vlan %d"%vl,[k+".1/24"]])
+        cvn.append("Vlan%d"%vl); cips.append([core,"Vlan %d"%vl,["%s.%d/24"%(k,svi_host(k))]])
     if csvis:
         cmds.append('add virtual_port_bulk "%s"'%dq([[core,csvis]]))
         cmds.append('add l2_segment_bulk "%s"'%dq(cbinds))
@@ -781,7 +950,7 @@ for s in client_sites:
         ssvis=[]; sbinds=[]; sips=[]; svn=[]
         for k,e,vl in srv_segs:
             ssvis.append("Vlan %d"%vl); sbinds.append([fw,"Vlan %d"%vl,["Vlan%d"%vl]])
-            svn.append("Vlan%d"%vl); sips.append([fw,"Vlan %d"%vl,[k+".1/24"]])
+            svn.append("Vlan%d"%vl); sips.append([fw,"Vlan %d"%vl,["%s.%d/24"%(k,svi_host(k))]])
         cmds.append('add virtual_port_bulk "%s"'%dq([[fw,ssvis]]))
         cmds.append('add l2_segment_bulk "%s"'%dq(sbinds))
         cmds.append('add l2_segment_bulk "%s"'%dq([[fw,"GigabitEthernet 0/3",svn],
@@ -818,7 +987,15 @@ if DO_SRV and svcs:
         cmds.append('add l2_segment_bulk "%s"'%dq(batch))
 
 # 7) attributes (endpoints + waypoints)
-for nm,ip,vn,st in servers: attr_rows.append([nm,("DEVICE",_role_color("Server")),"UCS C220 M6","Linux","Server"])
+for nm,ip,vn,st in servers:
+    nd=NETDEV.get(ip) if ip in nd_promote else None
+    if nd:
+        # observed network gear: green. Model/OS stay blank unless the export carried a real
+        # MAC vendor -- inventing a model for a device we only saw in flow data would be a lie.
+        attr_rows.append([nm,("DEVICE",_role_color(nd["stencil"],observed=True)),
+                          nd_vendor.get(ip,""),"",nd["stencil"]])
+    else:
+        attr_rows.append([nm,("DEVICE",_role_color("Server")),"UCS C220 M6","Linux","Server"])
 for nm,vn,st in pcs:        attr_rows.append([nm,("DEVICE",_role_color("PC")),"Workstation","Windows","PC"])
 for nm,proto,port,fl in svcs: attr_rows.append([nm,("DEVICE",_role_color("Server")),"Internet Service","-","Server"])
 attr_rows.append(["WAN",("WayPoint",_role_color("Cloud")),"","","Cloud"])
@@ -830,6 +1007,31 @@ for batch in wrap(attr_rows[1:],CHUNK):
 
 # ---------- write & summary ----------
 with open(OUTFILE,"w",encoding="utf-8") as f: f.write("\n".join(cmds))
+
+# ---------- network-device evidence CSV ----------
+# Every host that emitted network-only traffic is listed here, whether or not it became a
+# device, so the classification can be audited and tuned via netdev_force_ips /
+# netdev_exclude_ips / netdev_min_confidence.
+NDFILE=os.path.join(OUTDIR,"network_device_evidence.csv")
+nd_tier_cnt=collections.Counter(); nd_disp_cnt=collections.Counter()
+if DETECT_ND and NETDEV:
+    with open(NDFILE,"w",newline="",encoding="utf-8") as f:
+        w=csv.writer(f)
+        w.writerow(["ip","confidence","disposition","device_name","site","role","stencil",
+                    "evidence","routing_protocols","service_ports","inside",
+                    "mac_vendor","sna_host_groups"])
+        def _ndsort(kv):
+            ip,d=kv
+            return (-ND_TIER_RANK[d["tier"]], -sum(d["ev"].values()), ip)
+        for ip,d in sorted(NETDEV.items(),key=_ndsort):
+            nd_tier_cnt[d["tier"]]+=1; nd_disp_cnt[d["disposition"]]+=1
+            w.writerow([ip, d["tier"], d["disposition"], d.get("name",""), d.get("site",""),
+                        d["role"], d["stencil"],
+                        ";".join("%s=%d"%(k,n) for k,n in sorted(d["ev"].items())),
+                        ";".join(sorted(d["protos"])),
+                        "-".join(str(p) for p in nd_ports.get(ip,())),
+                        "yes" if is_inside(ip) else "no",
+                        nd_vendor.get(ip,""), nd_groups.get(ip,"")])
 
 # out-of-scope IP CSV (candidate servers that were not adopted)
 OOSFILE=os.path.join(OUTDIR,"out_of_scope_ips.csv")
@@ -935,11 +1137,34 @@ print("  adopted servers (1IP=1dev)  :", len(servers))
 print("  out-of-scope IPs            :", len(oos),
       "(%s)"%", ".join("%s=%d"%(k,v) for k,v in reason_cnt.items()) if reason_cnt else "")
 if DO_SRV: print("   -> out_of_scope_ips.csv :", OOSFILE)
+print("\n===== NETWORK DEVICE DETECTION (observed = green) =====")
+if not DETECT_ND:
+    print("  disabled (detect_network_devices=false or --netdev-confidence off)")
+else:
+    print("  min_confidence=%s  force=%s  exclude=%s"
+          %(ND_MIN_CONF,sorted(ND_FORCE_IPS),sorted(ND_EXCLUDE_IPS)))
+    print("  hosts with evidence :", len(NETDEV),
+          "(%s)"%", ".join("%s=%d"%(t,nd_tier_cnt[t]) for t in ("certain","strong","medium")
+                           if nd_tier_cnt[t]) if nd_tier_cnt else "")
+    print("  emitted as devices  :", len(nd_promote))
+    if nd_disp_cnt:
+        print("  disposition         :",
+              ", ".join("%s=%d"%(k,v) for k,v in sorted(nd_disp_cnt.items())))
+    _byrole=collections.Counter(NETDEV[ip]["role"] for ip in nd_promote)
+    if _byrole: print("  by role             :", dict(_byrole))
+    if nd_promote:
+        _s=sorted(nd_promote,key=lambda i:-sum(NETDEV[i]["ev"].values()))[:5]
+        print("   sample:", [(NETDEV[i].get("name"),i,
+                              ";".join(sorted(NETDEV[i]["ev"]))) for i in _s])
+    if NETDEV: print("   -> network_device_evidence.csv :", NDFILE)
+
 print("\n===== ENDPOINTS (--endpoints %s) ====="%args.endpoints)
-print("  servers(inside, 1IP=1dev):", len(servers))
+_srv_only=[t for t in servers if t[1] not in nd_promote]
+print("  servers(inside, 1IP=1dev):", len(_srv_only))
+print("  network devices (observed):", len(nd_promote))
 print("  PCs(1 segment=1dev)      :", len(pcs))
 print("  internet svc(proto,port) :", len(svcs), "(below-threshold skipped: %d)"%svc_oos)
-if servers: print("   server sample:", [n for n,_,_,_ in servers[:5]])
+if _srv_only: print("   server sample:", [n for n,_,_,_ in _srv_only[:5]])
 if pcs:     print("   pc sample    :", [n for n,_,_ in pcs[:5]])
 if svcs:    print("   svc sample   :", [(n,fl) for n,_,_,fl in svcs[:8]])
 infra=len(alldev)-len(servers)-len(pcs)-len(svcs)

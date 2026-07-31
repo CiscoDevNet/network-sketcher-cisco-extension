@@ -19,7 +19,7 @@ script **and** a `[FLOW]` traffic CSV — no SNA server connection required.
 | Item | Detail |
 |------|--------|
 | **Input** | Cisco SNA Flow Search CSV — **API format** (`searchSubject.* / peer.*`) or **UI export format** (`Subject IP Address`, `Total Bytes`="56.49 M", `Duration`="36min 38s") — auto-detected |
-| **Output** | `gen_master_commands.txt` (Network Sketcher CLI), `gen_flow_list.csv` (`[FLOW]` paste sheet), `out_of_scope_ips.csv` (audit) |
+| **Output** | `gen_master_commands.txt` (Network Sketcher CLI), `gen_flow_list.csv` (`[FLOW]` paste sheet), `out_of_scope_ips.csv` + `network_device_evidence.csv` (audit) |
 | **Dependencies** | Python 3.8+ standard library only — no pip packages |
 | **Platforms** | Windows, macOS, Ubuntu/Linux |
 | **SNA connectivity** | None — purely local file I/O |
@@ -64,6 +64,7 @@ python sna_to_ns_commands.py --input-dir captures --output-dir results
 | `--config` | `sna_to_ns_config.json` | Path to the settings JSON |
 | `--server-min-flows` | `1` | Extra lower bound on flows for a service to be adopted |
 | `--no-flow` | off | Skip generating `gen_flow_list.csv` |
+| `--netdev-confidence` | from config | `off` / `certain` / `strong` / `medium` — lowest confidence tier promoted to an observed network device. Overrides `netdev_min_confidence` |
 
 ## Output files
 
@@ -74,6 +75,7 @@ For each input CSV, a folder `Output_data/<csv_name>/` is created containing:
 | `gen_master_commands.txt` | Network Sketcher CLI commands (areas, devices, L1 links, VLANs/SVIs, IPs, attributes) |
 | `gen_flow_list.csv` | `[FLOW]` paste sheet: `Source/Destination Device Name` (master names), `TCP/UDP/ICMP`, `Service name(Port)`, `Max. bandwidth(Mbps)` |
 | `out_of_scope_ips.csv` | Candidate server IPs that were **not** adopted, with the reason |
+| `network_device_evidence.csv` | Every host that emitted network-only traffic, with the evidence, the confidence tier and what was done with it (see [Network device detection](#network-device-detection)) |
 | `_normalized_flow.csv` | Present only when the input was UI-format; the normalized intermediate the tool actually processed |
 
 ### How `Max. bandwidth(Mbps)` is computed
@@ -138,10 +140,11 @@ as-is and what to review before treating the topology as authoritative.
 | Bytes transferred / session duration | **Flow data** | Used to compute `Max. bandwidth(Mbps)` in the `[FLOW]` matrix. |
 | Server vs client role of each host | **Flow data** | Derived from SNA orientation (`peer = server`) and the TCP SYN-ACK / byte thresholds. |
 | `[FLOW]` traffic matrix (source/dest/proto/port/Mbps) | **Flow data** | Aggregated directly from observed conversations. |
+| Existence of real network gear (`NWD_*`) | **Flow data** | A host that emits traffic only network gear produces (routing protocols, NetFlow export, HSRP/GLBP, BFD, CAPWAP, established BGP/LDP) is observed, not guessed. Its *role*, stencil and place in the topology remain inferred. See [Network device detection](#network-device-detection). |
 | Subnets / VLAN segments (`/24`) | **Inferred** | Only the individual host IPs are observed. The `/24` prefix, the assumption that those IPs share one broadcast domain, and their modeling as VLANs/SVIs are all guesses — NetFlow carries no prefix length or VLAN information. |
 | Sites / areas and their grouping | **Inferred** | Reconstructed from the inter-region (`/16`) traffic graph; tunable / overridable via `sna_to_ns_config.json`. |
 | Datacenter vs client-site classification | **Inferred** | Heuristic from the server/client subnet mix. |
-| Firewalls (FW), core switches, access switches, edge routers | **Inferred** | Synthesized infrastructure devices — they are **not** present in the flow data. |
+| Firewalls (FW), core switches, access switches, edge routers | **Inferred** | Synthesized infrastructure devices — they are **not** present in the flow data. Distinct from the observed `NWD_*` devices above. |
 | WAN / Internet connectivity and links | **Inferred** | A plausible WAN/Internet edge is assumed; no link inventory exists in NetFlow. |
 | L1 links between devices | **Inferred** | Reconstructed to connect the synthesized devices. |
 | Device names | **Inferred** | Generated (servers are named from their adopted service ports; infra devices from site code + role). |
@@ -149,9 +152,78 @@ as-is and what to review before treating the topology as authoritative.
 | SVIs / IP addressing of infrastructure devices | **Inferred** | Modeled from the inferred segments, not observed device configs. |
 
 > In short: **IP addresses, L4 ports, protocols and the traffic matrix are
-> ground truth from the flow data.** Everything structural — firewalls,
-> switches, routers, the WAN, links, device names and physical port numbers — is
-> a best-effort reconstruction that you should review and adjust.
+> ground truth from the flow data**, and so is the existence of the `NWD_*`
+> devices. Everything else structural — the synthesised firewalls, cores and
+> access switches, the WAN, links and physical port numbers — is a best-effort
+> reconstruction that you should review and adjust.
+
+## Network device detection
+
+NetFlow carries no device inventory, but some traffic is emitted **only** by network
+gear. Any inside host seen producing it is therefore *observed* infrastructure rather
+than a guess, and is emitted as a green `NWD_*` device with a network stencil instead of
+being mistaken for a red application server.
+
+### Confidence tiers
+
+| Tier | Evidence | Why it is conclusive |
+|---|---|---|
+| **certain** | `routing_protocol` (OSPF / EIGRP / PIM / VRRP / IS-IS as the IP protocol), `netflow_export` (UDP to a collector port), `hsrp_glbp` (UDP 1985/3222 to `224.0.0.2` / `224.0.0.102`), `bfd` (UDP 3784/3785/4784), `bgp_ldp` (TCP 179/646 with an observed SYN-ACK), `capwap_ap` / `capwap_wlc` (UDP 5246/5247) | Only routers, switches, WLCs and APs speak these. Promoted by default |
+| **strong** | `aaa_client` (RADIUS 1645/1646/1812/1813), `tacacs_client` (TCP 49) | A RADIUS/TACACS+ client is normally a network access device, but a Windows NPS proxy also matches |
+| **medium** | `snmp_agent` (polled on UDP 161), `syslog_trap_src` (UDP 514/162), `cisco_mac` (Cisco OUI) | Common on network gear, but servers are polled, log and can be Cisco-branded too |
+
+Matching is deliberately strict: the **protocol must match and the port must be on the
+server side of the flow**. Matching a bare port number against the ephemeral source port
+produces large numbers of false positives — on a 400,000-flow production capture the
+loose form reported 33 phantom HSRP speakers, 30 BFD and 5 CAPWAP devices, all of which
+disappear under the strict rule.
+
+### What you can and cannot expect
+
+Detection is **asymmetric: a positive is conclusive, a negative proves nothing.** NetFlow
+accounts for transit traffic, and Cisco's own documentation states that locally generated
+traffic is not counted; NX-OS additionally does not record outgoing control-plane packets.
+Add that NetFlow is usually enabled on only part of the estate, and it follows that plenty
+of real network gear will emit no evidence at all. Use `netdev_force_ips` for devices you
+know exist.
+
+For the same reason **CDP and LLDP can never contribute**: they are non-IP Layer 2
+protocols (EtherType `0x2000` / `0x88CC`), so NetFlow and IPFIX never see them. The same
+applies to STP, VTP and DTP.
+
+In practice, flow export is by far the most productive signal and routing protocols the
+least. On the production capture mentioned above, 400,000 flows contained 145 EIGRP
+records and exactly one OSPF record, but yielded 21 flow exporters.
+
+### Role and stencil
+
+The role is inferred from the evidence and drives the stencil; it is *not* observed:
+
+| Role | Chosen when | Stencil |
+|---|---|---|
+| `Rtr` | routing protocol, HSRP/GLBP, BGP/LDP or BFD evidence | `Router` |
+| `L3sw` | flow export (a routed data-path feature), or the host owns the `.1`/`.254` address | `L3Switch` |
+| `Sw` | anything else | `Switch` |
+| `WLC` / `AP` | CAPWAP, controller side / access point side | `WLC` / `AP` |
+
+`Model` is left blank unless the export carried a real MAC vendor, in which case the vendor
+string is used — inventing a model number for a device only seen in flow data would be
+worse than admitting it is unknown.
+
+### Effect on the rest of the pipeline
+
+A confirmed network device is observed fact, so it bypasses the server heuristics: it needs
+no service port to qualify, owning the `.1` gateway address no longer disqualifies it, and
+a `/24` that is too quiet to be adopted on its own is force-adopted when it contains one.
+Where a device owns the `.1` address, the synthetic site SVI moves to `.254` so the observed
+address wins. Network devices take no part in the server-vs-client segment vote, so a router
+living in a user VLAN does not turn it into a server segment.
+
+Every candidate — promoted or not — is written to `network_device_evidence.csv` with its
+evidence, tier and disposition, so the classification can be audited and tuned via
+`netdev_min_confidence`, `netdev_force_ips` and `netdev_exclude_ips`. Setting
+`detect_network_devices` to `false` (or `--netdev-confidence off`) restores the pre-0.6
+behaviour byte-for-byte.
 
 ## Device naming conventions
 
@@ -163,6 +235,7 @@ Each name encodes the device type, location, and key metrics observed in the flo
 | **Internet service** | `Svc_{proto}{port}_{n}` | `Svc_TCP443_4253` | One device per (protocol, port) combination observed as an external server. `{proto}` is `TCP` or `UDP`, `{port}` is the service port number, `{n}` is the number of **distinct external server IP addresses** observed for that service. All internet service devices share a single L2 segment on the `Internet` waypoint (`VlanIntSvc`). |
 | **Intranet server** | `SRV_{site}_{ports}_{seq}` | `SRV_Camp_443-8080_3` | One device per inside server IP. `{site}` is the abbreviated site code, `{ports}` is a `-`-separated list of adopted service port numbers (those that exceed the byte/flow thresholds), `{seq}` is a per-site sequence number disambiguating servers with identical port sets. |
 | **Client PC segment** | `PC_{site}_{n}_{seq}` | `PC_Camp1_36_2` | One device per client /24 segment (not classified as a server segment). `{site}` is the abbreviated site code, `{n}` is the number of **distinct client IP addresses** observed in that /24, `{seq}` is a per-site sequence number. |
+| **Observed network device** | `NWD_{site}_{role}_{seq}` | `NWD_Data_Rtr_2` | One device per inside IP confirmed as real network gear. `{site}` is the abbreviated site code, `{role}` is `Rtr` / `L3sw` / `Sw` / `WLC` / `AP`, `{seq}` is a per-site, per-role sequence number. See [Network device detection](#network-device-detection). |
 
 ### Site code abbreviations
 
@@ -191,7 +264,7 @@ The generated `rename attribute_bulk` command writes a coloured cell into the **
 
 The two WayPoint colours separate **observed** WayPoints (blue, backed by a real network device — future) from **inferred** WayPoints (gray, abstract WAN / Internet / cloud edges).
 
-**In sna_converter:** every network device (Core / FW / Edge router / Access switch / Server switch) is synthesised from the flow data, so it is **gray**; observed servers (`SRV_*`) and internet services (`Svc_*`) are **red**; client PC segments (`PC_*`) are **yellow**; the `WAN` / `Internet` WayPoints are inferred, so **gray**. Observed network gear renders **green**, kept consistent with the other converters for any device the flow data surfaces as real.
+**In sna_converter:** the synthesised infrastructure stack (Core / FW / Edge router / Access switch / Server switch) is invented to complete the topology, so it is **gray**; network gear confirmed from network-only traffic (`NWD_*`) is **green**; observed servers (`SRV_*`) and internet services (`Svc_*`) are **red**; client PC segments (`PC_*`) are **yellow**; the `WAN` / `Internet` WayPoints have no real device behind them, so **gray**. The green/gray split therefore tells you at a glance which boxes in the diagram were actually seen in the flow data. Blue remains unused: a WayPoint would only turn blue if a specific observed device could be shown to *be* the WAN or Internet edge, and NetFlow carries nothing that identifies which device that is.
 
 ## Directory structure
 
@@ -209,6 +282,7 @@ sna_converter/
         ├── gen_master_commands.txt
         ├── gen_flow_list.csv
         ├── out_of_scope_ips.csv
+        ├── network_device_evidence.csv
         └── _normalized_flow.csv   (UI-format inputs only)
 ```
 

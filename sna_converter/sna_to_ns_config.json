@@ -2,8 +2,38 @@
     "_description": "Configuration file for csv_to_ns_commands.py (Cisco SNA/NetFlow CSV -> Network Sketcher commands). Every key is optional; omit one to use its code default. Only 'value' is read by the script; 'description' and 'sample' are documentation only. Manual lists/maps are always merged ON TOP of auto-detection (manual wins on conflict).",
 
     "version": {
-        "value": 0.5,
+        "value": 0.6,
         "description": "Version of this configuration file schema."
+    },
+
+    "detect_network_devices": {
+        "value": true,
+        "description": "Detect real network gear (routers / L3 switches / switches / WLCs / APs) from network-only traffic and emit it as an OBSERVED green NWD_* device instead of a red server. Evidence for every candidate is written to network_device_evidence.csv. Set false to restore the pre-0.6 behaviour where every endpoint is a server or a PC.",
+        "sample": false
+    },
+
+    "netdev_min_confidence": {
+        "value": "certain",
+        "description": "Lowest confidence tier promoted to a network device: 'certain' / 'strong' / 'medium' / 'off'. certain = traffic only network gear emits (routing protocols, NetFlow export, HSRP/GLBP, BFD, CAPWAP, established BGP/LDP). strong = RADIUS/TACACS+ client, i.e. a network access device (a Windows NPS proxy also matches). medium = SNMP-polled agent, syslog/trap source, Cisco MAC OUI (servers match these too). Lowering this raises coverage and false positives; hosts below the tier are still listed in network_device_evidence.csv.",
+        "sample": "strong"
+    },
+
+    "netflow_collector_ports": {
+        "value": [2055, 9995, 9996, 4739, 6343, 9991, 9993],
+        "description": "UDP destination ports treated as flow export (NetFlow / IPFIX / sFlow). Any inside host sending to one of these is a flow exporter, hence network gear. Add your collector's port if it listens elsewhere. Note a hypervisor virtual switch can also export flows, so review such hits in network_device_evidence.csv.",
+        "sample": [2055, 6343, 20055]
+    },
+
+    "netdev_force_ips": {
+        "value": [],
+        "description": "Manual list of IP addresses to always treat as observed network devices, even without evidence in the flow data. Use for gear you know exists but that never emitted network-only traffic during the capture window. As everywhere else in this file, manual settings win.",
+        "sample": ["10.1.0.1", "10.1.0.2"]
+    },
+
+    "netdev_exclude_ips": {
+        "value": [],
+        "description": "Manual list of IP addresses to never treat as network devices, overriding any detected evidence. Use for hosts that legitimately emit network-only traffic without being network gear (e.g. an ESXi host exporting NetFlow, or a Windows NPS server proxying RADIUS).",
+        "sample": ["10.50.1.40"]
     },
 
     "server_min_bytes": {
