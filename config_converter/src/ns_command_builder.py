@@ -63,7 +63,10 @@ def _q_outer(payload: str) -> str:
 
 def _attr_cell(value: str, rgb: tuple = _COLOR_WHITE) -> str:
     r, g, b = rgb
-    safe = value.replace("\\", "\\\\").replace("'", "\\'")
+    # NS re-parses each cell as a single-quoted Python literal, but shlex has
+    # already consumed one level of escaping by then, so a "\'" arrives as a
+    # bare "'" and breaks the parse. Drop apostrophes instead of escaping them.
+    safe = value.replace("\\", "\\\\").replace("'", "")
     return f"\\\"['{safe}',[{r}, {g}, {b}]]\\\""
 
 
