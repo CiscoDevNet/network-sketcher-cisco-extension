@@ -1,0 +1,39 @@
+# Generated output (kept out of version control)
+Output_data/*
+!Output_data/.gitkeep
+
+# Input exports are site-specific; don't commit real vManage exports
+# (the bundled sample_*.json file is the exception, kept as an example)
+Input_data/*
+!Input_data/.gitkeep
+!Input_data/sample_sdwan_export.json
+!Input_data/sample_sdwan_export_with_bfd.json
+
+# Generated artifacts if ever written next to the script
+ns_commands*.txt
+ns_model_*.json
+sdwan_inventory.csv
+sdwan_underlay_report.md
+sdwan_overlay_report.md
+vmanage_export.json
+\[MASTER\]*.nsm
+\[L1_DIAGRAM\]*
+\[L2_DIAGRAM\]*
+\[L3_DIAGRAM\]*
+\[L1L2L3_DIAGRAM\]*
+\[DEVICE_TABLE\]*
+\[AI_Context\]*
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.env
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

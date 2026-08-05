@@ -1,0 +1,67 @@
+{
+    "version": {
+        "value": 0.5,
+        "description": "sdwan_converter config schema version.",
+        "sample": 0.5
+    },
+    "device_naming": {
+        "value": "hostname",
+        "description": "Device-name source: 'hostname' (default, host-name) or 'hostname_ip' ('host-name (system-ip)', for exports with duplicate/blank hostnames).",
+        "sample": "hostname_ip"
+    },
+    "unknown_color_label": {
+        "value": "unknown",
+        "description": "Label used for a VPN0 physical/Tunnel interface whose transport colour could not be resolved via control/waninterface (e.g. the fetch skipped it, or the colour was not yet provisioned).",
+        "sample": "unknown"
+    },
+    "enable_observed_l1_links": {
+        "value": true,
+        "description": "Underlay only. When true (default), Pass 1 resolves each SD-WAN Edge's LLDP/CDP neighbor data (lldp_neighbors/cdp_neighbors, if present in the export) into real observed L1 links before Pass 2's per-colour inference runs on whatever VPN0 physical ports remain. Set to false to skip Pass 1 entirely and force pure per-colour inference for every VPN0 physical interface, unconditionally -- e.g. if a real deployment's LLDP/CDP data turns out to be unreliable or misleading (this parser's schema is best-effort/UNVERIFIED -- see the README).",
+        "sample": false
+    },
+    "prefer_lldp_over_cdp": {
+        "value": true,
+        "description": "Underlay only, when enable_observed_l1_links is true. When both protocols report the SAME local VPN0 port, which one's neighbor data wins the observed link: true (default) prefers LLDP (the universal protocol); false prefers CDP (IOS-XE/cEdge-only). The non-preferred protocol's matching entry is treated as a secondary confirmation only and never creates a second link for that port.",
+        "sample": false
+    },
+    "enable_controller_control_plane_links": {
+        "value": true,
+        "description": "Underlay only. When true (default), each Edge's OBSERVED control connections (control_connections in the export) are joined -- by ADDRESS via control/waninterface, never by colour name -- to the inferred transport segments, and the controllers are drawn hanging below them through two synthetic hops: a Router ('control_l3_dummy_name') standing in for the unknown routed hop up to the transport, and a Switch ('control_l2_dummy_name') below it standing in for the segment the controllers share. No IP address is assigned to either. Set to false, or feed an export with no control_connections data, to draw the controllers as unconnected inventory nodes instead (the pre-feature behaviour).",
+        "sample": false
+    },
+    "control_l3_dummy_name": {
+        "value": "Dummy_l3",
+        "description": "Underlay only, when enable_controller_control_plane_links is true. Name of the SYNTHETIC routed hop drawn above the controllers and linked up to every transport segment their control plane was observed over. It does NOT exist in the vManage data: the controllers sit on a subnet disjoint from every Edge transport subnet and vManage exposes no route table, so this device stands in for however many real hops lie between them. Its ports are pseudo ports numbered from 'Dummy 0'.",
+        "sample": "ControlPlane_L3"
+    },
+    "control_l2_dummy_name": {
+        "value": "Dummy_l2",
+        "description": "Underlay only, when enable_controller_control_plane_links is true. Name of the SYNTHETIC switch drawn between 'control_l3_dummy_name' and the controllers, standing in for the shared segment the controllers really do sit on. It carries one L2 segment named 'dummy_l2' on every one of its own ports (uplink included) and on no controller port. Its ports are pseudo ports numbered from 'Dummy 0'.",
+        "sample": "ControlPlane_L2"
+    },
+    "excluded_service_vpns": {
+        "value": [512, 65528, 65529, 65530],
+        "description": "Both modes (the overlay's clouds and the underlay's Service VPN LAN side are planned by the same helper). Service VPN ids to leave out of both diagrams, as ints or strings (both accepted). The default excludes VPN 512 (out-of-band management) and the 65528-65530 internal/system VPNs. VPN 0 (the Transport VPN) is ALWAYS excluded from the Service VPN side unconditionally regardless of this value -- the underlay draws it as the transport circuits instead, in the 'transport_vpn_name' VRF. Add e.g. a Guest VPN id here to focus both diagrams on the VPNs you care about.",
+        "sample": [512, 65528, 65529, 65530, 12]
+    },
+    "transport_vpn_name": {
+        "value": "Transport",
+        "description": "Underlay only. Display name for VPN 0 in the L3 instance (VRF) written by 'rename l3_instance' onto every Edge's VPN0 physical transport interface. It is fed through 'vrf_name_format' exactly like a Service VPN name, so the default pair yields 'Transport_vpn0' alongside 'Corporate_vpn10'. Set to an empty string to fall back to a bare 'vpn0'. Deliberately NOT read from the export's own 'vpn_names' entry for VPN 0, which is typically a placeholder ('VPN0') that would render as 'VPN0_vpn0'. The inferred transport CLOUDS never get a VRF -- this applies to the Edge ports only.",
+        "sample": "Underlay"
+    },
+    "vpn_name_fallback_format": {
+        "value": "VPN {id}",
+        "description": "Overlay only. Label used for a Service VPN whose configured NAME could not be resolved from vManage's feature templates ('vpn_names' in the export). '{id}' is replaced with the numeric vpn-id. VPN names are a TEMPLATE setting rather than device running-config, so they are unavailable for untemplated / Config-Group-managed devices and for any export predating this feature. This names the waypoint CLOUD and its L2 segment; the VRF name is built separately by 'vrf_name_format'.",
+        "sample": "Service VPN {id}"
+    },
+    "vrf_name_format": {
+        "value": "{name}_vpn{id}",
+        "description": "Both modes. L3 instance (VRF) name written by 'rename l3_instance' onto every Service VPN port, and onto the underlay's VPN0 transport ports via 'transport_vpn_name'. '{name}' is the configured VPN name and '{id}' the numeric vpn-id. A VPN with NO configured name ignores this format entirely and uses plain 'vpn<id>' instead (so an unnamed VPN 12 becomes 'vpn12', not 'VPN 12_vpn12').",
+        "sample": "{name}-VRF{id}"
+    },
+    "lan_dummy_name_format": {
+        "value": "Dummy_{n}",
+        "description": "Both modes. Name of the SYNTHETIC per-Edge LAN aggregation switch that every one of that Edge's Service VPN physical interfaces links down to. '{n}' is a global 1-based counter in sorted Edge-display-name order (one switch per Edge that has at least one Service VPN physical interface). Both mappers derive it from the same shared plan, so the two diagrams always place the same switch under the same Edge. This device does NOT exist in the vManage data -- it is a drawing device that lets the Edge's real LAN ports keep their IP/VRF while the VPN clouds (overlay) or the transport clouds (underlay) sit above the Edge.",
+        "sample": "LAN_{n}"
+    }
+}

@@ -1,0 +1,7 @@
+# sdwan_converter uses only the Python standard library (urllib, ssl,
+# http.cookiejar, ipaddress, json, argparse, dataclasses) -- no third-party
+# packages are required. This file is intentionally a no-op:
+#
+#   pip install -r requirements.txt
+#
+# Requires Python 3.10+.

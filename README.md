@@ -30,9 +30,9 @@ hand.
 Each tool targets a different data source, can be used independently, and the
 **conversion runs entirely on local files** (no live platform connection is
 needed at conversion time). `aci_converter`, `catc_converter`,
-`meraki_converter` and `nd_converter` additionally ship a **read-only REST API
-fetch** that pulls the model straight from the platform into that file; the
-others read a file you export from the platform.
+`meraki_converter`, `nd_converter` and `sdwan_converter` additionally ship a
+**read-only REST API fetch** that pulls the model straight from the platform
+into that file; the others read a file you export from the platform.
 
 All tools are standalone Python CLIs. Most run on the Python standard library
 alone — `cml_converter` needs `PyYAML`, `config_converter` and
@@ -53,7 +53,7 @@ to each. Tools are listed alphabetically.
 |---------|------|--------------|-------|--------|
 | Application Centric Infrastructure (ACI) | [`aci_converter`](./aci_converter/) | Convert an APIC fabric into two diagrams: the physical **underlay** (spine/leaf/APIC) and the logical **overlay** (Tenant/VRF/BD/EPG + contracts). | APIC model via read-only REST API (`fetch_from_apic`) → JSON | ✅ Available |
 | Catalyst Center | [`catc_converter`](./catc_converter/) | Convert an SD-Access campus into two diagrams: the physical **underlay** (core/distribution/access) and the logical **overlay** (Virtual Network / anycast gateway). | Catalyst Center model via read-only Intent REST API (`fetch_from_catc`) → JSON | ✅ Available |
-| Catalyst SD-WAN | — | Catalyst SD-WAN (formerly Cisco SD-WAN / Viptela) → Network Sketcher | — | 📋 Planning |
+| Catalyst SD-WAN | [`sdwan_converter`](./sdwan_converter/) | Convert a vManage-managed SD-WAN fabric into two diagrams: the physical **underlay** (VPN0 transport circuits above each Edge, its real Service VPN LAN ports below it, and the controllers attached to the transport their observed control connections use) and the Service VPN **overlay** (one waypoint cloud per VRF — e.g. Corporate / PCI / Guest — above each Edge, its real VRF LAN ports on a synthetic per-Edge LAN switch below it). | vManage model via read-only REST API (`fetch_from_vmanage`) → JSON | 🧪 Beta |
 | Cisco Modeling Labs (CML) | [`cml_converter`](./cml_converter/) | Convert a CML topology YAML (+ embedded running-configs) into Network Sketcher commands | CML lab YAML (local file) | ✅ Available |
 | Config files (IOS / IOS-XE / NX-OS / IOS-XR / ASA) | [`config_converter`](./config_converter/) | Reconstruct L1/L2/L3 from `show running-config` text files (subnet-based topology inference; no live device connection). | Running-config text files (local directory) | ✅ Available |
 | Cyber Vision | [`cv_converter`](./cv_converter/) | Build an OT topology (Purdue / IEC 62443 / CPwE zones) from Cyber Vision asset + activity exports. | Cisco Cyber Vision networkNodes + activities CSV (local files) | ✅ Available |
@@ -252,7 +252,38 @@ its **read-only REST API** (`fetch_from_nd`).
 
 ---
 
-## Tool 8 — `sna_converter`
+## Tool 8 — `sdwan_converter` (Beta)
+
+Convert a Cisco Catalyst SD-WAN (vManage-managed) fabric into two Network
+Sketcher diagrams — the physical **underlay** (vManage/vSmart/vBond + every
+Edge, plus inferred VPN0 transport-circuit clouds grouped by transport colour
++ subnet, each carrying its transport colour as a cloud-side L2 segment so the
+underlay's L2/L3 diagrams show one broadcast domain and subnet per circuit, and
+each optionally annotated with the observed BFD mesh shape; below the Edges it
+also draws their real Service VPN LAN side — physical VRF ports and Loopbacks
+with their IPs and VRFs, on a synthetic per-Edge LAN switch — while the VPN0
+transport ports themselves carry VPN 0 as their own `Transport_vpn0` VRF, and
+the controllers hang below the transport cloud(s) their observed control
+connections resolve to, through two synthetic `Dummy_l3` / `Dummy_l2` hops that
+stand in for a routed distance vManage does not report) and the
+Service VPN **overlay**, where every Edge is split top-to-bottom: **above** it,
+one synthetic `Vpn <id>` port per Service VPN links up to that VPN's waypoint
+cloud (which carries the VPN name as its cloud-side L2 segment); **below** it,
+its real physical VRF interfaces keep their IPs and link down to a synthetic
+per-Edge LAN switch, both ends sharing the VPN's VRF (`Corporate_vpn10`). Both
+diagrams name each area after the site's reported `site-name` (`br1`), falling
+back to `site<id>`. The model is pulled over vManage's **read-only REST API**
+(`fetch_from_vmanage`). The IPsec+BFD tunnel-to-tunnel mesh (drawn as links),
+VPN0 Tunnel interfaces, and OMP route state are deliberately out of scope for
+both diagrams.
+
+> **Full documentation** (installation, usage, the underlay/overlay model,
+> options, colour conventions, accuracy caveats, known issues) is in
+> [`sdwan_converter/README.md`](./sdwan_converter/).
+
+---
+
+## Tool 9 — `sna_converter`
 
 Reconstruct a multi-site L1/L2/L3 topology **plus endpoints** from observed
 **traffic** instead of a device inventory: `sna_converter` reads a Cisco Secure
@@ -315,7 +346,8 @@ network-sketcher-cisco-extension/
 ├── cv_converter/        ← Tool 5: Cyber Vision CSV → OT (Purdue / IEC 62443)
 ├── meraki_converter/    ← Tool 6: Meraki org (Dashboard API) → L1/L2/L3
 ├── nd_converter/        ← Tool 7: Nexus Dashboard / NDFC (REST API) → underlay + overlay
-├── sna_converter/       ← Tool 8: SNA / NetFlow CSV → commands + [FLOW] matrix
+├── sdwan_converter/     ← Tool 8: Catalyst SD-WAN / vManage (REST API) → transport underlay + Service VPN overlay (Beta)
+├── sna_converter/       ← Tool 9: SNA / NetFlow CSV → commands + [FLOW] matrix
 ├── template_converter/  ← scaffold for building new converters (contributor tooling)
 └── 3rd_party/           ← community / third-party converters (non-Cisco platforms)
     └── netbox_converter/  ← NetBox (REST API) → L1/L2/L3
@@ -358,6 +390,9 @@ the others.
 - [Cisco Nexus Dashboard](https://www.cisco.com/site/us/en/products/networking/cloud-networking/nexus-dashboard/index.html)
   — the NDFC / Fabric Controller platform whose read-only REST API feeds
   `nd_converter`.
+- [Cisco Catalyst SD-WAN](https://www.cisco.com/site/us/en/products/networking/sd-wan/index.html)
+  — the vManage-managed SD-WAN fabric platform whose read-only REST API feeds
+  `sdwan_converter`.
 - [Cisco Secure Network Analytics (SNA / Stealthwatch)](https://www.cisco.com/site/us/en/products/security/security-analytics/secure-network-analytics/index.html)
   — the NetFlow analytics platform whose Flow Search export feeds `sna_converter`.
 - [CiscoDevNet/cml-community](https://github.com/CiscoDevNet/cml-community) —

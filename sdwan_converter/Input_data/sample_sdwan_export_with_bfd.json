@@ -1,0 +1,433 @@
+{
+ "_meta": {
+  "source": "Cisco SD-WAN Manager (vManage)",
+  "host": "https://vmanage.example.com:8443",
+  "note": "Synthetic, sanitized sample -- RFC 1918 (private) and RFC 5737 (documentation) IPv4 ranges only. No real customer/production data. This variant additionally includes a synthetic bfd_sessions block (Full Mesh on both colours) to validate/demonstrate the UNDERLAY transport-segment mesh-shape annotation. It deliberately carries no 'vpn_names' block, so the overlay's Service VPN clouds fall back to their 'VPN <id>' labels here -- use sample_sdwan_export.json for the named-VPN overlay."
+ },
+ "devices": [
+  {
+   "host-name": "Manager01",
+   "system-ip": "10.0.0.1",
+   "site-id": "100",
+   "device-model": "vmanage",
+   "personality": "vmanage",
+   "uuid": "DUMMYUUID-0001",
+   "reachability": "reachable"
+  },
+  {
+   "host-name": "Controller01",
+   "system-ip": "10.0.0.2",
+   "site-id": "100",
+   "device-model": "vsmart",
+   "personality": "vsmart",
+   "uuid": "DUMMYUUID-0002",
+   "reachability": "reachable"
+  },
+  {
+   "host-name": "Validator01",
+   "system-ip": "10.0.0.3",
+   "site-id": "100",
+   "device-model": "vedge-cloud",
+   "personality": "vbond",
+   "uuid": "DUMMYUUID-0003",
+   "reachability": "reachable"
+  },
+  {
+   "host-name": "dc1-edge1",
+   "system-ip": "10.0.1.1",
+   "site-id": "1",
+   "device-model": "vedge-C8000V",
+   "personality": "vedge",
+   "uuid": "DUMMYUUID-0101",
+   "reachability": "reachable"
+  },
+  {
+   "host-name": "dc1-edge2",
+   "system-ip": "10.0.1.2",
+   "site-id": "1",
+   "device-model": "vedge-C8000V",
+   "personality": "vedge",
+   "uuid": "DUMMYUUID-0102",
+   "reachability": "reachable"
+  },
+  {
+   "host-name": "br1-edge1",
+   "system-ip": "10.0.3.1",
+   "site-id": "3",
+   "device-model": "vedge-C8000V",
+   "personality": "vedge",
+   "uuid": "DUMMYUUID-0301",
+   "reachability": "reachable"
+  },
+  {
+   "host-name": "br2-edge1",
+   "system-ip": "10.0.4.1",
+   "site-id": "4",
+   "device-model": "vedge-C8000V",
+   "personality": "vedge",
+   "uuid": "DUMMYUUID-0401",
+   "reachability": "reachable"
+  }
+ ],
+ "interfaces": {
+  "10.0.1.1": [
+   {
+    "ifname": "GigabitEthernet1",
+    "vpn-id": "0",
+    "ip-address": "172.16.1.1",
+    "ipv4-subnet-mask": "255.255.255.0",
+    "if-admin-status": "Up",
+    "if-oper-status": "Up",
+    "af-type": "ipv4"
+   },
+   {
+    "ifname": "GigabitEthernet2",
+    "vpn-id": "0",
+    "ip-address": "172.16.2.1",
+    "ipv4-subnet-mask": "255.255.255.0",
+    "if-admin-status": "Up",
+    "if-oper-status": "Up",
+    "af-type": "ipv4"
+   },
+   {
+    "ifname": "GigabitEthernet3",
+    "vpn-id": "10",
+    "ip-address": "10.10.1.1",
+    "ipv4-subnet-mask": "255.255.255.0",
+    "if-admin-status": "Up",
+    "if-oper-status": "Up",
+    "af-type": "ipv4"
+   },
+   {
+    "ifname": "Tunnel1",
+    "vpn-id": "0",
+    "ip-address": "172.16.1.1",
+    "ipv4-subnet-mask": "255.255.255.255",
+    "if-admin-status": "Up",
+    "if-oper-status": "Up",
+    "af-type": "ipv4"
+   },
+   {
+    "ifname": "Tunnel2",
+    "vpn-id": "0",
+    "ip-address": "172.16.2.1",
+    "ipv4-subnet-mask": "255.255.255.255",
+    "if-admin-status": "Up",
+    "if-oper-status": "Up",
+    "af-type": "ipv4"
+   },
+   {
+    "ifname": "NVI0",
+    "vpn-id": "0",
+    "ip-address": "0.0.0.0",
+    "ipv4-subnet-mask": "255.255.255.255",
+    "if-admin-status": "Up",
+    "if-oper-status": "Up",
+    "af-type": "ipv4"
+   },
+   {
+    "ifname": "Sdwan-system-intf",
+    "vpn-id": "0",
+    "ip-address": "10.0.1.1",
+    "ipv4-subnet-mask": "255.255.255.255",
+    "if-admin-status": "Up",
+    "if-oper-status": "Up",
+    "af-type": "ipv4"
+   }
+  ],
+  "10.0.1.2": [
+   {
+    "ifname": "GigabitEthernet1",
+    "vpn-id": "0",
+    "ip-address": "172.16.1.2",
+    "ipv4-subnet-mask": "255.255.255.0",
+    "if-admin-status": "Up",
+    "if-oper-status": "Up",
+    "af-type": "ipv4"
+   },
+   {
+    "ifname": "GigabitEthernet2",
+    "vpn-id": "0",
+    "ip-address": "172.16.2.2",
+    "ipv4-subnet-mask": "255.255.255.0",
+    "if-admin-status": "Up",
+    "if-oper-status": "Up",
+    "af-type": "ipv4"
+   },
+   {
+    "ifname": "Tunnel1",
+    "vpn-id": "0",
+    "ip-address": "172.16.1.2",
+    "ipv4-subnet-mask": "255.255.255.255",
+    "if-admin-status": "Up",
+    "if-oper-status": "Up",
+    "af-type": "ipv4"
+   },
+   {
+    "ifname": "Tunnel2",
+    "vpn-id": "0",
+    "ip-address": "172.16.2.2",
+    "ipv4-subnet-mask": "255.255.255.255",
+    "if-admin-status": "Up",
+    "if-oper-status": "Up",
+    "af-type": "ipv4"
+   }
+  ],
+  "10.0.3.1": [
+   {
+    "ifname": "GigabitEthernet1",
+    "vpn-id": "0",
+    "ip-address": "172.16.1.5",
+    "ipv4-subnet-mask": "255.255.255.0",
+    "if-admin-status": "Up",
+    "if-oper-status": "Up",
+    "af-type": "ipv4"
+   },
+   {
+    "ifname": "GigabitEthernet2",
+    "vpn-id": "0",
+    "ip-address": "172.16.2.5",
+    "ipv4-subnet-mask": "255.255.255.0",
+    "if-admin-status": "Up",
+    "if-oper-status": "Up",
+    "af-type": "ipv4"
+   },
+   {
+    "ifname": "Tunnel1",
+    "vpn-id": "0",
+    "ip-address": "172.16.1.5",
+    "ipv4-subnet-mask": "255.255.255.255",
+    "if-admin-status": "Up",
+    "if-oper-status": "Up",
+    "af-type": "ipv4"
+   },
+   {
+    "ifname": "Tunnel2",
+    "vpn-id": "0",
+    "ip-address": "172.16.2.5",
+    "ipv4-subnet-mask": "255.255.255.255",
+    "if-admin-status": "Up",
+    "if-oper-status": "Up",
+    "af-type": "ipv4"
+   }
+  ],
+  "10.0.4.1": [
+   {
+    "ifname": "GigabitEthernet1",
+    "vpn-id": "0",
+    "ip-address": "192.0.2.6",
+    "ipv4-subnet-mask": "255.255.255.248",
+    "if-admin-status": "Up",
+    "if-oper-status": "Up",
+    "af-type": "ipv4"
+   },
+   {
+    "ifname": "GigabitEthernet2",
+    "vpn-id": "0",
+    "ip-address": "172.16.2.6",
+    "ipv4-subnet-mask": "255.255.255.0",
+    "if-admin-status": "Up",
+    "if-oper-status": "Up",
+    "af-type": "ipv4"
+   },
+   {
+    "ifname": "Tunnel1",
+    "vpn-id": "0",
+    "ip-address": "192.0.2.6",
+    "ipv4-subnet-mask": "255.255.255.255",
+    "if-admin-status": "Up",
+    "if-oper-status": "Up",
+    "af-type": "ipv4"
+   },
+   {
+    "ifname": "Tunnel2",
+    "vpn-id": "0",
+    "ip-address": "172.16.2.6",
+    "ipv4-subnet-mask": "255.255.255.255",
+    "if-admin-status": "Up",
+    "if-oper-status": "Up",
+    "af-type": "ipv4"
+   }
+  ]
+ },
+ "wan_interfaces": {
+  "10.0.1.1": [
+   {
+    "color": "biz-internet",
+    "private-ip": "172.16.1.1",
+    "public-ip": "172.16.1.1"
+   },
+   {
+    "color": "mpls",
+    "private-ip": "172.16.2.1",
+    "public-ip": ""
+   }
+  ],
+  "10.0.1.2": [
+   {
+    "color": "biz-internet",
+    "private-ip": "172.16.1.2",
+    "public-ip": "172.16.1.2"
+   },
+   {
+    "color": "mpls",
+    "private-ip": "172.16.2.2",
+    "public-ip": ""
+   }
+  ],
+  "10.0.3.1": [
+   {
+    "color": "biz-internet",
+    "private-ip": "172.16.1.5",
+    "public-ip": "172.16.1.5"
+   },
+   {
+    "color": "mpls",
+    "private-ip": "172.16.2.5",
+    "public-ip": ""
+   }
+  ],
+  "10.0.4.1": [
+   {
+    "color": "biz-internet",
+    "private-ip": "192.0.2.6",
+    "public-ip": "192.0.2.6"
+   },
+   {
+    "color": "mpls",
+    "private-ip": "172.16.2.6",
+    "public-ip": ""
+   }
+  ]
+ },
+ "bfd_sessions": {
+  "10.0.1.1": [
+   {
+    "system-ip": "10.0.3.1",
+    "color": "biz-internet",
+    "state": "up",
+    "site-id": "3"
+   },
+   {
+    "system-ip": "10.0.4.1",
+    "color": "biz-internet",
+    "state": "up",
+    "site-id": "4"
+   },
+   {
+    "system-ip": "10.0.3.1",
+    "color": "mpls",
+    "state": "up",
+    "site-id": "3"
+   },
+   {
+    "system-ip": "10.0.4.1",
+    "color": "mpls",
+    "state": "up",
+    "site-id": "4"
+   }
+  ],
+  "10.0.1.2": [
+   {
+    "system-ip": "10.0.3.1",
+    "color": "biz-internet",
+    "state": "up",
+    "site-id": "3"
+   },
+   {
+    "system-ip": "10.0.4.1",
+    "color": "biz-internet",
+    "state": "up",
+    "site-id": "4"
+   },
+   {
+    "system-ip": "10.0.3.1",
+    "color": "mpls",
+    "state": "up",
+    "site-id": "3"
+   },
+   {
+    "system-ip": "10.0.4.1",
+    "color": "mpls",
+    "state": "up",
+    "site-id": "4"
+   }
+  ],
+  "10.0.3.1": [
+   {
+    "system-ip": "10.0.1.1",
+    "color": "biz-internet",
+    "state": "up",
+    "site-id": "1"
+   },
+   {
+    "system-ip": "10.0.1.2",
+    "color": "biz-internet",
+    "state": "up",
+    "site-id": "1"
+   },
+   {
+    "system-ip": "10.0.4.1",
+    "color": "biz-internet",
+    "state": "up",
+    "site-id": "4"
+   },
+   {
+    "system-ip": "10.0.1.1",
+    "color": "mpls",
+    "state": "up",
+    "site-id": "1"
+   },
+   {
+    "system-ip": "10.0.1.2",
+    "color": "mpls",
+    "state": "up",
+    "site-id": "1"
+   },
+   {
+    "system-ip": "10.0.4.1",
+    "color": "mpls",
+    "state": "up",
+    "site-id": "4"
+   }
+  ],
+  "10.0.4.1": [
+   {
+    "system-ip": "10.0.1.1",
+    "color": "biz-internet",
+    "state": "up",
+    "site-id": "1"
+   },
+   {
+    "system-ip": "10.0.1.2",
+    "color": "biz-internet",
+    "state": "up",
+    "site-id": "1"
+   },
+   {
+    "system-ip": "10.0.3.1",
+    "color": "biz-internet",
+    "state": "up",
+    "site-id": "3"
+   },
+   {
+    "system-ip": "10.0.1.1",
+    "color": "mpls",
+    "state": "up",
+    "site-id": "1"
+   },
+   {
+    "system-ip": "10.0.1.2",
+    "color": "mpls",
+    "state": "up",
+    "site-id": "1"
+   },
+   {
+    "system-ip": "10.0.3.1",
+    "color": "mpls",
+    "state": "up",
+    "site-id": "3"
+   }
+  ]
+ }
+}
