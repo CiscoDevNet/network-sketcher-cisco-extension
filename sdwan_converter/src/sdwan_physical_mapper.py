@@ -53,6 +53,19 @@ supplement second" pattern:
   them. A colour with only one member still gets its own single-member cloud
   (representing that Edge's own dedicated WAN access circuit).
 
+  EXCEPTION -- a physical interface whose colour could NOT be resolved via
+  ``control/waninterface`` (see ``unknown_color_label`` below) is the ONE
+  case that is never merged with another interface in the same situation:
+  ``unknown`` is a placeholder meaning "could not be identified", not a real
+  shared TLOC colour, so two such interfaces carry no evidence of actually
+  riding the same WAN -- grouping them together would draw a false
+  adjacency. Each colour-unresolved interface therefore gets its OWN
+  single-member cloud instead, named ``<unknown_color_label>_1``,
+  ``<unknown_color_label>_2``, ... in deterministic ``(device, port)`` order;
+  its ``colour=`` attribute still reports the plain ``unknown_color_label``
+  value (that IS its real, if unidentified, colour) even though the cloud's
+  NAME carries a disambiguating sequence number.
+
   If Pass 1 finds zero observed links anywhere, the result is IDENTICAL to
   the previous inference-only behaviour (set ``enable_observed_l1_links`` to
   ``false`` in the config to force pass-2-only unconditionally).
@@ -231,6 +244,7 @@ def build_physical_model(
               "multi_subnet_segments": 0,
               "l2_segments": 0, "cloud_svi_ports": 0,
               "ip_assignments": 0, "unresolved_color": 0,
+              "unresolved_color_segments": 0,
               "observed_links": 0, "observed_links_lldp": 0, "observed_links_cdp": 0,
               "edges_with_neighbor_data": 0, "unresolved_neighbors": 0,
               "mesh_annotated": 0,
@@ -311,7 +325,23 @@ def build_physical_model(
     # Edges' transport networks) and is handled by the control-plane pass
     # further down instead. Built ONCE, up front, so both passes below share
     # identical per-port (ip, cidr, network, colour) facts.
-    edge_ports: Dict[str, Dict[str, Dict[str, str]]] = defaultdict(dict)
+    #
+    # Colour resolution is itself TWO PASSES (see the module docstring's
+    # EXCEPTION note): PASS A below collects each port's basic facts plus its
+    # resolved colour, or "" when control/waninterface could not match it
+    # (counted in 'unresolved_color'). PASS B then assigns the FINAL
+    # per-port GROUPING KEY that 'edge_ports[...]["color"]' carries from here
+    # on: a resolved colour is used as-is, but each colour-UNRESOLVED port
+    # gets its OWN single-member key ('<unknown_color_label>_1', '_2', ... in
+    # deterministic (device, port) order) instead of the shared literal
+    # 'unknown_color_label' value every such port used to collapse into --
+    # see the EXCEPTION note above for why they must never be merged.
+    # 'real_color_by_group' remembers each grouping key's ACTUAL colour (the
+    # bare 'unknown_color_label' value for every one of those groups) so the
+    # cloud built from it can still report its true colour separately from
+    # its (now disambiguated) name -- see the 'colour=' attribute below.
+    port_facts: Dict[Tuple[str, str], Dict[str, str]] = {}
+    unresolved_ports: List[Tuple[str, str]] = []
     for dev in idx.devices:
         if topo.device_personality(dev) != "vedge":
             continue
@@ -329,11 +359,28 @@ def build_physical_model(
             if not network:
                 continue
             color = topo.color_for_ip(wan_ifaces, ip)
-            if not color:
-                color = unknown_color
-                counts["unresolved_color"] += 1
             port = normalise_port_name(itf.get("ifname") or "")
-            edge_ports[name][port] = {"ip": ip, "cidr": cidr, "network": network, "color": color}
+            key = (name, port)
+            port_facts[key] = {"ip": ip, "cidr": cidr, "network": network, "color": color or ""}
+            if not color:
+                unresolved_ports.append(key)
+                counts["unresolved_color"] += 1
+
+    unresolved_group_key: Dict[Tuple[str, str], str] = {
+        key: f"{unknown_color}_{i}"
+        for i, key in enumerate(sorted(unresolved_ports), start=1)
+    }
+    counts["unresolved_color_segments"] = len(unresolved_group_key)
+
+    edge_ports: Dict[str, Dict[str, Dict[str, str]]] = defaultdict(dict)
+    real_color_by_group: Dict[str, str] = {}
+    for (name, port), facts in port_facts.items():
+        group_key = facts["color"] or unresolved_group_key[(name, port)]
+        real_color_by_group.setdefault(group_key, facts["color"] or unknown_color)
+        edge_ports[name][port] = {
+            "ip": facts["ip"], "cidr": facts["cidr"], "network": facts["network"],
+            "color": group_key,
+        }
 
     # ----- PASS 1 (preferred, OBSERVED) -- LLDP/CDP neighbor adjacency ------
     # Resolves each Edge's neighbor entries into a REAL device-to-device L1
@@ -382,6 +429,15 @@ def build_physical_model(
     cloud_next_port: Dict[str, int] = {}
     multi_subnet_clouds: Dict[str, List[str]] = {}
     for color, members in sorted(groups.items()):
+        # 'color' is the GROUPING KEY (see the two-pass note above): for a
+        # resolved TLOC colour it IS that colour, but for a colour-unresolved
+        # group it is a disambiguating 'unknown_N'. The group's REAL
+        # transport colour -- always the same for every member of the group,
+        # and always the bare 'unknown_color_label' value for an unresolved
+        # group -- lives in 'real_color_by_group' and is what the 'colour='
+        # attribute and the stencil model annotation report below, so the
+        # cloud's NAME/identity is never confused with its actual colour.
+        real_color = real_color_by_group.get(color, color)
         member_sysips = sorted({
             name_to_sysip[devname] for devname, _port, _cidr in members
             if devname in name_to_sysip
@@ -390,7 +446,9 @@ def build_physical_model(
             topo.network_of(cidr) or cidr for _devname, _port, cidr in members
         })
         # Below 3 member Edges a "mesh shape" is meaningless (a single pair is
-        # trivially a full mesh), so the annotation is skipped entirely.
+        # trivially a full mesh), so the annotation is skipped entirely. A
+        # colour-unresolved group is always single-member, so this never
+        # fires for one.
         mesh_shape = None
         if len(member_sysips) >= 3:
             mesh_shape = topo.classify_mesh_shape(
@@ -404,13 +462,13 @@ def build_physical_model(
         seg_name = _unique(label)
         st = sm.map_logical(
             seg_name, "transport-segment",
-            model=f"Inferred VPN0 transport segment (colour={color})",
+            model=f"Inferred VPN0 transport segment (colour={real_color})",
         )
         mappings.append(st)
         # 'networks' goes LAST: the command builder truncates this cell, and a
         # cloud can now carry an unbounded list of subnets, so the fixed-length
         # facts must come first or a long list would chop them off.
-        attr_bits = [f"colour={color}", f"members={len(members)} (inferred)"]
+        attr_bits = [f"colour={real_color}", f"members={len(members)} (inferred)"]
         if mesh_shape:
             mesh_shape_by_segment[color] = mesh_shape
             attr_bits.append(f"mesh={mesh_shape} (observed BFD sessions)")
@@ -572,7 +630,12 @@ def build_physical_model(
         "the identity: a TLOC colour is the transport's identity in SD-WAN, "
         "so several access subnets of one colour merge into a single cloud "
         "carrying all of them. A colour with only one member still gets its "
-        "own single-member cloud (that Edge's dedicated WAN access circuit)."
+        "own single-member cloud (that Edge's dedicated WAN access circuit). "
+        "EXCEPTION -- an interface whose colour could NOT be resolved (see "
+        "the 'unresolved_color' caveat below) is never merged with another "
+        "such interface: 'unknown_color_label' is a placeholder for 'could "
+        "not be identified', not evidence the two interfaces share a WAN, so "
+        "each gets its own single-member cloud instead."
     )
     if counts["l2_segments"]:
         caveats.append(
@@ -675,9 +738,13 @@ def build_physical_model(
         caveats.append(
             f"INFERRED -- {counts['single_member_segments']} of "
             f"{counts['transport_segments']} transport cloud(s) have exactly "
-            "ONE member Edge (no other Edge reported an unresolved VPN0 port "
-            "on that colour) and are drawn as a single-member cloud rather "
-            "than omitted, so that Edge's WAN circuit is still represented."
+            "ONE member Edge and are drawn as a single-member cloud rather "
+            "than omitted, so that Edge's WAN circuit is still represented. "
+            "For a RESOLVED colour this means no other Edge reported an "
+            f"unresolved VPN0 port on it; {counts['unresolved_color_segments']} "
+            "of these single-member clouds are instead the colour-unresolved "
+            "'unknown_N' clouds described in the 'unresolved_color' caveat "
+            "above, which are ALWAYS single-member by construction."
         )
     if multi_subnet_clouds:
         detail = "; ".join(
@@ -698,10 +765,20 @@ def build_physical_model(
     if counts["unresolved_color"]:
         caveats.append(
             f"INFERRED -- {counts['unresolved_color']} VPN0 physical "
-            f"interface(s) could not be matched to a transport colour via "
+            "interface(s) could not be matched to a transport colour via "
             "control/waninterface (e.g. the fetch skipped it, or the colour "
-            "was not yet provisioned) and were grouped under the "
-            "'unknown_color_label' configuration value instead."
+            "was not yet provisioned). 'unknown_color_label' is only a "
+            "placeholder meaning 'could not be identified' -- it is NOT a "
+            "real shared TLOC colour, so there is no evidence that any two "
+            "such interfaces actually ride the same WAN. Unlike every "
+            "resolved colour above, they are therefore NEVER merged with "
+            f"each other: each became its OWN single-member cloud "
+            f"({counts['unresolved_color_segments']} such cloud(s) "
+            f"created), named '{unknown_color}_1', '{unknown_color}_2', ... "
+            "in deterministic (device, port) order. Each cloud's 'colour=' "
+            f"attribute still reports the plain '{unknown_color}' value -- "
+            "that IS its real, if unidentified, colour -- even though its "
+            "NAME carries a disambiguating sequence number."
         )
     if l3_less_moved:
         caveats.append(

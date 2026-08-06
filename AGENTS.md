@@ -51,7 +51,7 @@ python -m config_converter.src.convert \
 # cv_converter — build an OT (Purdue/IEC 62443) topology from Cyber Vision CSV exports
 cd cv_converter && python cv_to_ns_commands.py            # auto-detects CSVs in Input_data/
 
-# sdwan_converter — convert a (bundled, synthetic) vManage export into underlay + overlay scripts
+# sdwan_converter — convert a (bundled, sanitized real) vManage export into underlay + overlay scripts
 python -m sdwan_converter.src.convert \
     -i sdwan_converter/Input_data/sample_sdwan_export.json \
     -m both -o sdwan_converter/Output_data/ns_commands.txt \

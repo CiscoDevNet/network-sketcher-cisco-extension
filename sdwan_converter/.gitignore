@@ -3,11 +3,11 @@ Output_data/*
 !Output_data/.gitkeep
 
 # Input exports are site-specific; don't commit real vManage exports
-# (the bundled sample_*.json file is the exception, kept as an example)
+# (the bundled sample_sdwan_export.json file is the exception, kept as an
+# example -- it is a sanitized real export; see tools/sanitize_vmanage_export.py)
 Input_data/*
 !Input_data/.gitkeep
 !Input_data/sample_sdwan_export.json
-!Input_data/sample_sdwan_export_with_bfd.json
 
 # Generated artifacts if ever written next to the script
 ns_commands*.txt
