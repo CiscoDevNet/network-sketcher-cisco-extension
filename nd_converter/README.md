@@ -11,6 +11,8 @@ converted **entirely offline** into two diagrams.
 > Controller) and the Network Sketcher engine: both modes import cleanly and
 > every L1/L2/L3 diagram artifact generates correctly.
 
+<img alt="NDFC VXLAN EVPN fabric converted into underlay and overlay diagrams" src="https://github.com/user-attachments/assets/fa648322-e112-4bda-8508-9cbc42dd2870" />
+
 ---
 
 ## Why two diagrams: underlay vs. overlay

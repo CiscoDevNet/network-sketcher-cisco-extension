@@ -12,6 +12,8 @@ script **and** a `[FLOW]` traffic CSV — no SNA server connection required.
 > services) purely from observed NetFlow, then emits the per-flow traffic
 > matrix you can paste into a Network Sketcher `[FLOW]` sheet.
 
+<img alt="Multi-site topology and endpoints reconstructed from observed NetFlow" src="https://github.com/user-attachments/assets/d2cb5e45-4eaa-44fb-869d-8527f93b8ea6" />
+
 ---
 
 ## Overview

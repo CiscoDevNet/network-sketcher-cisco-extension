@@ -15,6 +15,10 @@ conversion time.
 > Network Sketcher instance. See `DESIGN.md` section 6 for the phase log and
 > section 5 for edge cases discovered during live verification.
 
+<img alt="Topology reconstructed from running-config text files — L1 view" src="https://github.com/user-attachments/assets/9af782bf-2cb0-47d4-95c6-31329ca27492" />
+
+<img alt="Topology reconstructed from running-config text files — L2/L3 view" src="https://github.com/user-attachments/assets/524ef563-0790-4a78-9063-3820a7af0872" />
+
 ---
 
 ## Overview

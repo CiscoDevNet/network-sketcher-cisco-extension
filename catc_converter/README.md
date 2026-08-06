@@ -7,6 +7,8 @@ scripts. The model is pulled from Catalyst Center over its **read-only Intent
 REST API** (`fetch_from_catc.py`) — or from a previously downloaded export — and
 converted **entirely offline** into two diagrams.
 
+<img alt="Catalyst Center SD-Access underlay and overlay diagrams" src="https://github.com/user-attachments/assets/1ca7d68c-6c8e-4007-a7bb-a3f988fe3121" />
+
 ---
 
 ## Why two diagrams: underlay vs. overlay

@@ -24,6 +24,8 @@ Meraki Dashboard API v1  --(read-only GET)-->  meraki_export.json
 > VRFs, HA/AutoVPN/LACP) from the Dashboard API and renders them under an
 > `Internet` cloud waypoint.
 
+<img alt="Meraki organization converted into a Network Sketcher L1/L2/L3 diagram" src="https://github.com/user-attachments/assets/8ec8110b-2896-4140-a1bc-3b12462abdd5" />
+
 ---
 
 ## Overview

@@ -13,6 +13,14 @@ reference architecture rather than guessing it.
 > `network-sketcher` MCP engine — commands import cleanly and all diagram
 > artifacts generate correctly.
 
+<img alt="OT topology laid out along the Purdue model — L1 view" src="https://github.com/user-attachments/assets/1add3423-2e36-44b4-bc80-f0e953253261" />
+
+<img alt="OT topology laid out along the Purdue model — L2 view" src="https://github.com/user-attachments/assets/61fa2a0c-7a26-413c-950a-ff1ec0c8bfd7" />
+
+<img alt="OT topology laid out along the Purdue model — L3 view" src="https://github.com/user-attachments/assets/5fe8fb63-9c5a-4b79-afb9-9f527e5100ad" />
+
+[cv_sample_1.zip](https://github.com/user-attachments/files/29197721/cv_sample_1.zip)
+
 ---
 
 ## Inputs (one or both)

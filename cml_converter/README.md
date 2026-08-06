@@ -10,6 +10,16 @@ script — no CML server required.
 > **extended version that also reconstructs Layer 2 and Layer 3** (VLANs, SVIs,
 > sub-interfaces, port-channels, IP addresses and VRFs) from the running-configs.
 
+<img alt="CML lab converted into a Network Sketcher L1 diagram" src="https://github.com/user-attachments/assets/3fc59bf2-0ec9-43d1-986d-24dd63734c9c" />
+
+<img alt="CML lab converted into a Network Sketcher L2 diagram" src="https://github.com/user-attachments/assets/114883b4-74b0-4a68-a6e6-264940148568" />
+
+<img alt="CML lab converted into a Network Sketcher L3 diagram" src="https://github.com/user-attachments/assets/4044d19d-332b-41d7-a34c-2329ccd34353" />
+
+[[L1L2L3_DIAGRAM]AllAreas_no_data_1.html](https://github.com/user-attachments/files/28463950/L1L2L3_DIAGRAM.AllAreas_no_data_1.html)
+
+[[DEVICE_TABLE]no_data_1.html](https://github.com/user-attachments/files/28463946/DEVICE_TABLE.no_data_1.html)
+
 ---
 
 ## Overview

@@ -25,6 +25,8 @@ NetBox REST API (read-only GET)  -->  netbox_export.json
 > the `dummy_stub_N` peers that stand in for uncabled VLAN/IP ports. See
 > [Device color conventions](#device-color-conventions).
 
+<img alt="NetBox DCIM/IPAM data converted into a Network Sketcher L1/L2/L3 diagram" src="https://github.com/user-attachments/assets/8945d126-c673-4195-87cf-fec4f7c9dcbd" />
+
 ---
 
 ## Overview

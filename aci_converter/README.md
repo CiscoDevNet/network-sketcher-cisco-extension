@@ -7,6 +7,12 @@ scripts. The fabric model is pulled from the APIC over its **read-only REST API*
 (`fetch_from_apic.py`) — or from a manually downloaded APIC Configuration Export
 — and converted **entirely offline** into two diagrams.
 
+<img alt="ACI underlay diagram — spine / leaf / border-leaf / APIC with observed LLDP cabling" src="https://github.com/user-attachments/assets/ad3b3274-cfeb-4dcf-b104-72aac5a7145a" />
+
+<img alt="ACI overlay diagram — Tenant / VRF / Bridge Domain / EPG with contracts" src="https://github.com/user-attachments/assets/90c5298d-3cf9-441a-820f-27fa9ea92aa8" />
+
+[sample_aci.zip](https://github.com/user-attachments/files/29280501/sample_aci.zip)
+
 ---
 
 ## Why two diagrams: underlay vs. overlay
