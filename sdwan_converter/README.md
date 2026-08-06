@@ -17,6 +17,12 @@ scripts. The model is pulled from vManage over its **read-only REST API**
 (`fetch_from_vmanage.py`) — or from a previously downloaded export — and
 converted **entirely offline** into two diagrams.
 
+<img alt="image" src="https://github.com/user-attachments/assets/042c7bbe-1b17-4431-bd80-157195c78cc3" />
+
+<img alt="image" src="https://github.com/user-attachments/assets/8655106d-08b8-46ed-aac7-7e6199642eef" />
+
+[Sample_sd-wan.zip](https://github.com/user-attachments/files/30772635/Sample_sd-wan.zip)
+
 ---
 
 ## Why two diagrams: underlay vs. overlay
