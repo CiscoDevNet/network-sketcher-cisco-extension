@@ -25,16 +25,17 @@ respective licenses and copyrights.
   https://developer.cisco.com/modeling-labs/
   The network simulation platform used as the input data source.
 
-Runtime Python dependencies (installed separately via pip; see
-cml_converter/requirements.txt). Each retains its own license:
+Runtime Python dependencies (installed separately via pip; see each
+converter's requirements.txt). Each retains its own license:
 
 - PyYAML
   https://pyyaml.org/
   YAML parsing of CML lab files.
 
-- ciscoconfparse2
-  https://github.com/mpenning/ciscoconfparse2
-  Optional, recommended parsing of Cisco running-configurations.
+- NetworkX
+  https://networkx.org/
+  Graph algorithms for the placement/tiering layout and shared-subnet matching
+  used by config_converter and 3rd_party/netbox_converter.
 
 --------------------------------------------------------------------------------
 Validation data

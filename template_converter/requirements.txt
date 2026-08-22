@@ -1,8 +1,8 @@
 # TEMPLATE FILE.
 #
 # The default and strong preference across this repo is ZERO third-party
-# dependencies — every converter except cml_converter (PyYAML + optional
-# ciscoconfparse2) and 3rd_party/netbox_converter (networkx, for its
+# dependencies — every converter except cml_converter (PyYAML), and
+# config_converter / 3rd_party/netbox_converter (networkx, for their
 # placement-graph logic) runs on the Python standard library only:
 #   argparse, csv, json, pathlib, re, ssl, sys, urllib,
 #   collections, dataclasses, typing

@@ -28,7 +28,7 @@ script — no CML server required.
 |------|--------|
 | **Input** | CML Lab YAML (UI export or API dump) + optional running-config files |
 | **Output** | `ns_commands.txt` ready for Network Sketcher `run_commands`, plus debug/audit artefacts |
-| **Dependencies** | Python 3.10+, PyYAML, ciscoconfparse2 (optional but recommended) |
+| **Dependencies** | Python 3.10+, PyYAML — running-config parsing itself is stdlib-only |
 | **CML connectivity** | None — purely local file I/O |
 
 ## Quick Start

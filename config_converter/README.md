@@ -27,7 +27,7 @@ conversion time.
 |------|--------|
 | **Input** | Any readable running-config text file(s) under a directory — one device per file, multiple devices per file, or a mix; optional per-site subdirectories |
 | **Output** | `<stem>_config.txt` (Network Sketcher CLI commands, Phase 1–6) plus debug/audit artefacts |
-| **Dependencies** | Python 3.10+, **networkx** (required); **ciscoconfparse2** (optional, improves parsing) |
+| **Dependencies** | Python 3.10+, **networkx** (required) — config parsing itself is stdlib-only |
 | **Platform connectivity** | None — purely local file I/O |
 
 ### Supported platforms

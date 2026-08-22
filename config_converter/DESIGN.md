@@ -85,7 +85,7 @@ this distinction must be enforced from the start.
 extraction logic that can be reused **as-is from running-config text alone**.
 
 - **Pipeline**: `detect_os_family()` (keyword detection on the first 2000 characters) →
-  when CiscoConfParse is available, extract only hostname/VLAN/VRF → **`_extract_interfaces_sectionwise()` is
+  `_parse_top_level()` (hostname/VLAN/VRF only) → **`_extract_interfaces_sectionwise()` is
   the primary path for interface extraction** (content-based scan independent of indentation,
   delimited by `interface` through `!`/blank line/top-level keyword. Handles flattened dumps from
   IOL/CSR, etc.) → `_extract_linux_host_ips()` (for CML Linux nodes; likely unnecessary for
@@ -449,14 +449,25 @@ no point having it only in type hints). Updated both `stencil_mapper.py` display
 (`OS_FAMILY_DISPLAY`) and hostname heuristics (`HOSTNAME_KEYWORD_RULES` `"asa"`/`"ftd"` entries) to
 this unified label.
 
-#### 4.2.2 Adding `ciscoconfparse2` Dependency (Finalized — §8.3 Decision 10)
+#### 4.2.2 Config Parsing Is stdlib-Only (Revised — supersedes §8.3 Decision 10)
 
-Add `ciscoconfparse2` as an **optional (soft) dependency** in `requirements.txt`
-(follow `cml_converter/src/config_parser.py` `_HAVE_CCP` flag pattern as-is — version pin aligned
-with `cml_converter/requirements.txt` `ciscoconfparse2>=0.7.0`). When installed, hostname/VLAN/VRF/ACL
-extraction accuracy improves; when absent, fall back to existing regex-based
-`_parse_with_regex()`/`_extract_interfaces_sectionwise()` — same "works without it" design as
-cml_converter.
+`config_parser.py` uses **no third-party parsing library**. `ciscoconfparse2` was originally
+adopted as an optional soft dependency (§8.3 decision 10) behind a `_HAVE_CCP` flag, mirroring
+`cml_converter`; both were removed for two reasons:
+
+1. **Licence**: `ciscoconfparse2` is distributed under `GPL-3.0-only`, which is incompatible with
+   this repository's Apache-2.0 licence. It also pulled in 24 transitive packages (including
+   `hypothesis`, a test-only library) as runtime dependencies.
+2. **No measured benefit**: it was only ever used for hostname/VLAN/VRF, never for
+   interface/ACL/BGP/QoS extraction. An A/B comparison over the bundled `sample1/` corpus
+   (IOS, IOS-XE concatenated, NX-OS, IOS-XR, ASA) produced **byte-identical output** for all five
+   artefacts with and without it, and a parser-level comparison over 14 cases found exactly one
+   difference: the legacy single-line `vlan 10 name Users` form, which `_parse_top_level()` now
+   handles (and, unlike CiscoConfParse, also captures the VLAN name).
+
+Hostname/VLAN/VRF are extracted by `_parse_top_level()`; everything else by the
+indentation-agnostic section scanners (`_extract_interfaces_sectionwise()` and friends).
+Do not reintroduce a GPL-licensed dependency.
 
 **Risks & edge cases**:
 - `_extract_interfaces_sectionwise()` `_SECTION_BOUNDARY_RE` is based on IOS/IOS-XE/NX-OS top-level
@@ -1269,7 +1280,7 @@ gantt
 
 | Phase | Content | Main Deliverables | Completion Criteria |
 |---|---|---|---|
-| **Phase 1a** | Implement `config_parser` common foundation (cml_converter reuse as base, **IOS/IOS-XE only**). Extract hostname/VLAN/interfaces (IP, trunk/access type, shutdown)/HSRP/VRRP/GLBP virtual IP/ACL definition+application/NAT side/crypto map/DHCP/external BGP neighbor/bandwidth-limit (shape/police) signals. Implement `convert.py` `_load_config_directory()` extension-agnostic scan + multi-device concatenated file split (§4.1.1). Use `ciscoconfparse2` when available for hostname/VLAN/VRF (§4.2.2). Create new synthetic sample (RFC5737/RFC1918 compliant: 3 IOS + 2 IOS-XE, both one-file-one-device and multi-device concatenated patterns). | `config_parser.py` (IOS/IOS-XE path), synthetic samples, smoke script | ✅**Complete** — synthetic IOS/IOS-XE samples correctly extract hostname, interfaces, IP, VLAN, trunk type, HSRP virtual IP, bandwidth-limit signals, WAN signals (NAT outside/external BGP). Multi-device concatenated files split correctly |
+| **Phase 1a** | Implement `config_parser` common foundation (cml_converter reuse as base, **IOS/IOS-XE only**). Extract hostname/VLAN/interfaces (IP, trunk/access type, shutdown)/HSRP/VRRP/GLBP virtual IP/ACL definition+application/NAT side/crypto map/DHCP/external BGP neighbor/bandwidth-limit (shape/police) signals. Implement `convert.py` `_load_config_directory()` extension-agnostic scan + multi-device concatenated file split (§4.1.1). Extract hostname/VLAN/VRF with the stdlib-only `_parse_top_level()` (§4.2.2). Create new synthetic sample (RFC5737/RFC1918 compliant: 3 IOS + 2 IOS-XE, both one-file-one-device and multi-device concatenated patterns). | `config_parser.py` (IOS/IOS-XE path), synthetic samples, smoke script | ✅**Complete** — synthetic IOS/IOS-XE samples correctly extract hostname, interfaces, IP, VLAN, trunk type, HSRP virtual IP, bandwidth-limit signals, WAN signals (NAT outside/external BGP). Multi-device concatenated files split correctly |
 | **Phase 1b** | Add NX-OS to `config_parser` (`!Command: show running-config` boundary marker, `feature` syntax, nested `hsrp <group>`/`ip <addr>` virtual IP, `ip access-list <name>` (type omitted + sequenced rules), `policy-map type qos <name>`) | NX-OS sample (`nxos_core01.txt`) + parser support | ✅**Complete** — synthetic NX-OS sample extracts hostname, VRF, VLAN, SVI/physical/mgmt interfaces, nested HSRP virtual IP, ACL (sequenced), external BGP peers at 1a-equivalent precision. No regression on IOS/IOS-XE samples |
 | **Phase 1c** | Add IOS-XR to `config_parser` (`interface Bundle-Ether<n>`, `MgmtEth<n>/.../.../…`, `ipv4 address`/`ipv4 access-group ingress\|egress`/`bundle id <n> mode <mode>`/bare `vrf <name>`, `ipv4 access-list` (sequenced), nested `neighbor`/`remote-as` BGP, §4.2.1 items) | IOS-XR sample (`iosxr_edge01.txt`) + parser support | ✅**Complete** — synthetic IOS-XR sample extracts hostname, VRF, Bundle-Ether (LAG), member ports, ACL (`ipv4 access-list`, sequenced), nested BGP neighbors. No regression on Phase 1a/1b samples |
 | **Phase 1d** | Add ASA/FTD to `config_parser` (`nameif`/`security-level`, ASA single-line `access-list <name> extended permit\|deny`, global `access-group <name> in\|out interface <nameif>` resolved via `nameif` after interface extraction, collect `object network`/`object-group network` presence only (NAT resolution out of scope, §4.2.1), FTD same logic as ASA) | ASA/FTD sample (`asa_fw01.txt`) + parser support | ✅**Complete** — synthetic ASA sample extracts hostname, `nameif` interfaces, IP, ACL via global `access-group` (`is_bidirectional_deny_all()` included), `object network` name list, external BGP peers (ASA single-line `neighbor`/`remote-as`). No regression on Phase 1a/1b/1c samples |
@@ -1459,6 +1470,10 @@ The following were presented to the user for decisions before implementation; **
 10. Add `ciscoconfparse2` as optional dependency (requirement B, §4.2)?
    ⇒ Add ciscoconfparse2 as dependency.
    **→ Reflected in §4.2.2 (new, decision 10), `requirements.txt`.**
+   **→ LATER REVERSED**: `ciscoconfparse2` is `GPL-3.0-only` and incompatible with this
+   repository's Apache-2.0 licence, and an A/B measurement showed it produced byte-identical
+   output. Removed from both `config_converter` and `cml_converter`; config parsing is now
+   stdlib-only (see the revised §4.2.2).
 
 ### 8.4 Low Priority (Implementation Details)
 
@@ -1483,7 +1498,7 @@ All 13 decision items listed in §8 **received final user answers and are finali
 - **Default connectivity policy**: Requirement F (full connectivity) defaults to comprehensive (`assume_fully_connected: true`); requirement G (closed environment) detected devices are structurally separated into dedicated isolation area (`isolated_area_name`, default **`"Closed"`**) rather than "excluded" from F exploration. Both integrated without conflict (§4.6, §4.7.1).
 - **Clear gate for L2 switch inference**: Maintain IP-reachability-based inference scope; new logic (§4.3.3) judges "should infer L2 switch placement" when HSRP/VRRP/GLBP virtual IP present, 3+ candidates, or large subnet (default /24 or shorter); k≥3 shared subnets resolved real config priority → `shared_subnet_strategy` (default `best_pair`) (§4.3.6).
 - **Auditability enhancement**: Cross-site duplicate private IP range candidates without distinguishing material recorded in `config_excluded_links.csv` (§4.3.9) instead of drawing false L1 links — following sna_converter design.
-- **Expanded supported OS range**: IOS-XR/ASA/FTD in formal Phase 1 scope (§4.2.1); `ciscoconfparse2` as optional dependency (§4.2.2).
+- **Expanded supported OS range**: IOS-XR/ASA/FTD in formal Phase 1 scope (§4.2.1); config parsing is stdlib-only, with no third-party (and specifically no GPL-licensed) parser (§4.2.2).
 - **Dependencies finalized**: `networkx` Blossom algorithm formally adopted as preferred method for both C matching and D layout (§4.3.4, §4.4).
 - **Config-driven naming and scoring**: Inferred devices unified as `Dummy_<2-letter-type-code>_<n>` (interfaces `Dummy <n>`) (§4.5.1). WAN scoring weights, thresholds, and signal items (including bandwidth-limit configuration) all post-adjustable via `config_converter_to_ns_config.json` (§4.8).
 - **Input file flexibility**: All readable text files under Input_data; one-file-one-device, one-file-multi-device, mixed patterns, and OS auto-detection (§4.1.1). Japanese localization out of scope for all processing (§4.4/§7).

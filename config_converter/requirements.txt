@@ -20,14 +20,10 @@ networkx>=3.0
 # Version pin matches the existing precedent in
 # 3rd_party/netbox_converter/requirements.txt.
 
-# Optional third-party dependency (confirmed decision, see DESIGN.md
-# section 8.3 decision 10 and section 4.2.2):
-# ciscoconfparse2>=0.7.0   # OPTIONAL soft dependency, same as cml_converter's
-#                          # config_parser.py (see its `_HAVE_CCP` flag):
-#                          # improves hostname/VLAN/VRF/ACL/object-group parsing
-#                          # accuracy when installed, but config_parser.py must
-#                          # keep working (via its own regex fallback) without
-#                          # it. Version pin matches cml_converter/requirements.txt.
+# No config-parsing library is used: config_parser.py is stdlib-only (see
+# DESIGN.md section 4.2.2). A GPL-licensed parser would be incompatible with
+# this repository's Apache-2.0 licence, and measurement showed such a library
+# added no extraction accuracy over the indentation-agnostic section scanners.
 #
 # Do not add any other third-party dependency without documenting why here,
 # per template_converter/GUIDE.md's "stdlib unless truly necessary" rule.

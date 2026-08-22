@@ -12,6 +12,11 @@ that will be stored on the NS device as an attribute string.
 Designed to be tolerant of incomplete configs; never raises on a single bad
 line. Each input config produces a ParsedConfig instance and a list of
 fall-through (unrecognised) lines that the assessment phase counts.
+
+Third-party parsing libraries are deliberately NOT used: this module is
+stdlib-only so that the converter stays installable with PyYAML alone and
+the whole repository can remain Apache-2.0 compatible. Everything is
+extracted by the indentation-agnostic section scanners below.
 """
 from __future__ import annotations
 
@@ -19,13 +24,6 @@ import ipaddress
 import re
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Set
-
-try:
-    from ciscoconfparse2 import CiscoConfParse  # type: ignore
-    _HAVE_CCP = True
-except Exception:  # pragma: no cover - fallback
-    CiscoConfParse = None  # type: ignore
-    _HAVE_CCP = False
 
 
 # ---------------------------------------------------------------------------
@@ -226,17 +224,13 @@ def parse_running_config(raw_text: str, hostname_hint: Optional[str] = None) -> 
 
     parsed.os_family = detect_os_family(raw_text)
 
-    if _HAVE_CCP:
-        ccp = CiscoConfParse(raw_text.splitlines(), syntax="nxos" if parsed.os_family == "nxos" else "ios")
-        _parse_with_ccp(parsed, ccp)
-    else:
-        _parse_with_regex(parsed, raw_text)
+    _parse_top_level(parsed, raw_text)
 
     # Interface stanzas are extracted with an indentation-agnostic section scan
     # (see _extract_interfaces_sectionwise). Some IOL/CSR ``show running-config``
     # dumps embedded in CML labs flatten interface child lines to column 0, which
-    # defeats both ciscoconfparse's hierarchy and the indent-based regex parser;
-    # the section scan recovers those interface IP/L2 settings regardless.
+    # defeats any indent-based hierarchy parser; the section scan recovers those
+    # interface IP/L2 settings regardless.
     _extract_interfaces_sectionwise(parsed, raw_text)
 
     # Linux endpoint hosts (CML "desktop"/"alpine"/"ubuntu" nodes) carry their
@@ -252,60 +246,28 @@ def parse_running_config(raw_text: str, hostname_hint: Optional[str] = None) -> 
 
 
 # ---------------------------------------------------------------------------
-# CiscoConfParse-based path
+# Top-level (hostname / VLAN database / VRF) scan
 # ---------------------------------------------------------------------------
 
-def _parse_with_ccp(parsed: ParsedConfig, ccp) -> None:
-    for line in ccp.find_objects(r"^hostname\s+"):
-        parts = line.text.strip().split(maxsplit=1)
-        if len(parts) == 2:
-            parsed.hostname = parts[1]
+def _parse_top_level(parsed: ParsedConfig, raw_text: str) -> None:
+    """Extract hostname, the VLAN database and VRF names from column-0 stanzas.
 
-    # VLAN definitions: NX-OS "vlan 10" then optional "name X"; IOS "vlan 10" same.
-    for vlan_obj in ccp.find_objects(r"^vlan\s+\d+(?:,\d+|\s|\s*$)"):
-        m = re.match(r"^vlan\s+([\d,\-\s]+)", vlan_obj.text)
-        if not m:
-            continue
-        ids = _expand_vlan_list(m.group(1))
-        name: Optional[str] = None
-        for child in vlan_obj.children:
-            if child.text.strip().startswith("name "):
-                name = child.text.strip().split(maxsplit=1)[1]
-        for vid in ids:
-            parsed.vlans[vid] = name or parsed.vlans.get(vid, "")
-
-    # VRF: NX-OS 'vrf context X'; IOS-XE 'vrf definition X'; IOS legacy 'ip vrf X'.
-    for vrf_obj in ccp.find_objects(r"^vrf\s+(?:context|definition)\s+\S+|^ip\s+vrf\s+\S+"):
-        parts = vrf_obj.text.strip().split()
-        if parts and parts[-1] != "":
-            parsed.vrfs.add(parts[-1])
-
-    # NOTE: interfaces are NOT extracted here — see _extract_interfaces_sectionwise,
-    # which is indentation-agnostic and handles flattened config dumps too.
-
-    # Track parsed line counts.
-    parsed.parsed_line_count = len(ccp.objs) if hasattr(ccp, "objs") else 0
-
-
-# ---------------------------------------------------------------------------
-# Regex fallback (used only if ciscoconfparse2 is unavailable)
-# ---------------------------------------------------------------------------
-
-def _parse_with_regex(parsed: ParsedConfig, raw_text: str) -> None:
-    current_iface: Optional[ParsedInterface] = None
+    Interfaces are deliberately NOT built here — ``interface`` lines are only
+    counted so they are not mistaken for fall-through. The authoritative
+    interface extraction is ``_extract_interfaces_sectionwise()``, which is
+    indentation-agnostic and therefore also copes with flattened config dumps.
+    """
     current_vlan_block: Optional[List[int]] = None
 
     for line in raw_text.splitlines():
         raw = line.rstrip()
         if not raw:
-            current_iface = None
             current_vlan_block = None
             continue
         stripped = raw.lstrip()
         indent = len(raw) - len(stripped)
 
         if indent == 0:
-            current_iface = None
             current_vlan_block = None
 
             m = re.match(r"^hostname\s+(\S+)", stripped)
@@ -313,11 +275,18 @@ def _parse_with_regex(parsed: ParsedConfig, raw_text: str) -> None:
                 parsed.hostname = m.group(1)
                 parsed.parsed_line_count += 1
                 continue
-            m = re.match(r"^vlan\s+([\d,\-\s]+)\s*$", stripped)
+            # ``vlan <ids>`` with the VLAN name either on the following
+            # indented ``name X`` line (modern IOS/NX-OS) or inline on the
+            # same line (legacy ``vlan database`` style ``vlan 10 name Users``).
+            m = re.match(r"^vlan\s+([\d,\-\s]+?)(?:\s+name\s+(\S+))?\s*$", stripped)
             if m:
                 current_vlan_block = _expand_vlan_list(m.group(1))
+                inline_name = m.group(2)
                 for vid in current_vlan_block:
-                    parsed.vlans.setdefault(vid, "")
+                    if inline_name:
+                        parsed.vlans[vid] = inline_name
+                    else:
+                        parsed.vlans.setdefault(vid, "")
                 parsed.parsed_line_count += 1
                 continue
             m = re.match(r"^(?:vrf\s+(?:context|definition)|ip\s+vrf)\s+(\S+)", stripped)
@@ -325,11 +294,7 @@ def _parse_with_regex(parsed: ParsedConfig, raw_text: str) -> None:
                 parsed.vrfs.add(m.group(1))
                 parsed.parsed_line_count += 1
                 continue
-            m = re.match(r"^interface\s+(\S+)", stripped)
-            if m:
-                name = m.group(1)
-                current_iface = ParsedInterface(name=name, kind=_iface_kind(name))
-                parsed.interfaces[name] = current_iface
+            if stripped.startswith("interface "):
                 parsed.parsed_line_count += 1
                 continue
             if _line_is_ignored(stripped):
@@ -338,26 +303,20 @@ def _parse_with_regex(parsed: ParsedConfig, raw_text: str) -> None:
             parsed.fall_through_count += 1
         else:
             # Indented child line
-            if current_iface is not None:
-                if _consume_iface_line(stripped, current_iface):
-                    parsed.parsed_line_count += 1
-                else:
-                    parsed.fall_through_count += 1
-            elif current_vlan_block is not None:
+            if current_vlan_block is not None:
                 m = re.match(r"^name\s+(.+)$", stripped)
                 if m:
                     for vid in current_vlan_block:
                         parsed.vlans[vid] = m.group(1).strip()
                 parsed.parsed_line_count += 1
+            elif _line_is_ignored(stripped):
+                parsed.parsed_line_count += 1
             else:
-                if _line_is_ignored(stripped):
-                    parsed.parsed_line_count += 1
-                else:
-                    parsed.fall_through_count += 1
+                parsed.fall_through_count += 1
 
 
 # ---------------------------------------------------------------------------
-# Interface child-line consumer (shared by both paths)
+# Interface child-line consumer
 # ---------------------------------------------------------------------------
 
 def _consume_iface_line(stripped: str, iface: ParsedInterface) -> bool:

@@ -17,8 +17,8 @@ and the relevant tool's `README.md` before making changes.
 - **Python version**: Use Python 3.10+ (works for all tools). `cv_converter` and `sna_converter` also
   run on 3.8+. `aci_converter`, `cv_converter`, `sdwan_converter`, and `sna_converter` use the
   **standard library only**;
-  `cml_converter` needs `PyYAML` (optionally `ciscoconfparse2`); `config_converter` needs
-  `networkx` (optionally `ciscoconfparse2`).
+  `cml_converter` needs `PyYAML`; `config_converter` needs `networkx`. Do not introduce a
+  GPL-licensed dependency — this repository is Apache-2.0 (see `NOTICE`).
 - **Virtual env (recommended)**:
   ```bash
   python3 -m venv .venv
@@ -27,9 +27,9 @@ and the relevant tool's `README.md` before making changes.
   ```
 - **Per-tool dependencies** (install only what the tool you are touching needs):
   ```bash
-  pip install -r cml_converter/requirements.txt   # PyYAML (+ optional ciscoconfparse2)
+  pip install -r cml_converter/requirements.txt   # PyYAML
   pip install -r aci_converter/requirements.txt   # no-op (stdlib only)
-  pip install -r config_converter/requirements.txt   # networkx (+ optional ciscoconfparse2)
+  pip install -r config_converter/requirements.txt   # networkx
 ```
 
 ### Quick run examples

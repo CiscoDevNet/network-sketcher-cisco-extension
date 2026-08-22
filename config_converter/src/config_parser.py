@@ -54,7 +54,7 @@ existence-only collection (``ParsedConfig.nat_objects``) by
 out of scope per DESIGN.md 4.2.1.
 
 Ported, near-verbatim, from ``cml_converter/src/config_parser.py`` (the
-indentation-agnostic interface-stanza scanner, the CiscoConfParse-optional
+indentation-agnostic interface-stanza scanner, the top-level
 hostname/vlan/vrf pass, and the per-line interface attribute consumer).
 ``_extract_linux_host_ips()`` was intentionally NOT ported — it is CML-lab
 specific (Linux "desktop"/"alpine"/"ubuntu" nodes booted from a shell
@@ -88,14 +88,11 @@ decision 7) is DEFERRED to Phase 1c/1d (DESIGN.md section 6) — see the
 module-level TODO markers below for exactly what each follow-up phase must
 add.
 
-Optional dependency: ``ciscoconfparse2`` (see ``requirements.txt`` and
-DESIGN.md section 4.2.2, decision 10) — the same soft-dependency pattern as
-``cml_converter``'s ``_HAVE_CCP`` flag: use it when installed to improve
-hostname/vlan/vrf extraction accuracy, but this module keeps working via its
-own regex fallback when it is not installed. CiscoConfParse is deliberately
-NOT used for interface/ACL/BGP/QoS extraction — the indentation-agnostic
-section scanners below handle those uniformly regardless of whether CCP is
-present, so those code paths are exercised identically either way.
+No third-party parsing library is used (see ``requirements.txt`` and
+DESIGN.md section 4.2.2): every stanza — hostname/vlan/vrf as well as
+interface/ACL/BGP/QoS — is extracted by the stdlib-only, indentation-agnostic
+section scanners below. ``networkx`` remains this converter's single
+third-party dependency.
 """
 from __future__ import annotations
 
@@ -103,13 +100,6 @@ import ipaddress
 import re
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Set
-
-try:
-    from ciscoconfparse2 import CiscoConfParse  # type: ignore
-    _HAVE_CCP = True
-except Exception:  # pragma: no cover - fallback
-    CiscoConfParse = None  # type: ignore
-    _HAVE_CCP = False
 
 
 # ---------------------------------------------------------------------------
@@ -501,27 +491,11 @@ def parse_running_config(raw_text: str, hostname_hint: Optional[str] = None) -> 
 
     parsed.os_family = detect_os_family(raw_text)
 
-    if _HAVE_CCP:
-        try:
-            if parsed.os_family == "nxos":
-                ccp_syntax = "nxos"
-            elif parsed.os_family == "iosxr":
-                ccp_syntax = "iosxr"  # Phase 1c; falls back to regex below if unsupported by the installed version
-            else:
-                ccp_syntax = "ios"
-            ccp = CiscoConfParse(raw_text.splitlines(), syntax=ccp_syntax)
-            _parse_with_ccp(parsed, ccp)
-        except Exception:
-            # Never let an optional-dependency quirk abort parsing — fall
-            # back to the always-available regex pass instead.
-            _parse_with_regex(parsed, raw_text)
-    else:
-        _parse_with_regex(parsed, raw_text)
+    _parse_top_level(parsed, raw_text)
 
     # Interface stanzas are extracted with an indentation-agnostic section
-    # scan regardless of the CCP/regex path above (see
-    # _extract_interfaces_sectionwise) — this is the primary source of truth
-    # for interface attributes.
+    # scan (see _extract_interfaces_sectionwise) — this is the primary source
+    # of truth for interface attributes.
     policy_bandwidth_limited = _scan_bandwidth_limited_policies(raw_text)
     _extract_interfaces_sectionwise(parsed, raw_text, policy_bandwidth_limited)
 
@@ -555,45 +529,10 @@ def parse_running_config(raw_text: str, hostname_hint: Optional[str] = None) -> 
 
 
 # ---------------------------------------------------------------------------
-# CiscoConfParse-based path (hostname / vlan / vrf only — see module
-# docstring for why interface/ACL/BGP/QoS extraction always uses the
-# indentation-agnostic regex scanners regardless of CCP availability)
+# Top-level (hostname / VLAN database / VRF) scan
 # ---------------------------------------------------------------------------
 
-def _parse_with_ccp(parsed: ParsedConfig, ccp) -> None:
-    for line in ccp.find_objects(r"^hostname\s+"):
-        parts = line.text.strip().split(maxsplit=1)
-        if len(parts) == 2:
-            parsed.hostname = parts[1]
-
-    # VLAN definitions: NX-OS "vlan 10" then optional "name X"; IOS "vlan 10" same.
-    for vlan_obj in ccp.find_objects(r"^vlan\s+\d+(?:,\d+|\s|\s*$)"):
-        m = re.match(r"^vlan\s+([\d,\-\s]+)", vlan_obj.text)
-        if not m:
-            continue
-        ids = _expand_vlan_list(m.group(1))
-        name: Optional[str] = None
-        for child in vlan_obj.children:
-            if child.text.strip().startswith("name "):
-                name = child.text.strip().split(maxsplit=1)[1]
-        for vid in ids:
-            parsed.vlans[vid] = name or parsed.vlans.get(vid, "")
-
-    # VRF: NX-OS 'vrf context X'; IOS-XE 'vrf definition X'; IOS legacy
-    # 'ip vrf X'; IOS-XR (Phase 1c) bare top-level 'vrf X'.
-    for vrf_obj in ccp.find_objects(r"^vrf\s+(?:context|definition)\s+\S+|^ip\s+vrf\s+\S+|^vrf\s+\S+"):
-        parts = vrf_obj.text.strip().split()
-        if parts and parts[-1] != "":
-            parsed.vrfs.add(parts[-1])
-
-    parsed.parsed_line_count = len(ccp.objs) if hasattr(ccp, "objs") else 0
-
-
-# ---------------------------------------------------------------------------
-# Regex fallback (used only if ciscoconfparse2 is unavailable)
-# ---------------------------------------------------------------------------
-
-def _parse_with_regex(parsed: ParsedConfig, raw_text: str) -> None:
+def _parse_top_level(parsed: ParsedConfig, raw_text: str) -> None:
     current_vlan_block: Optional[List[int]] = None
 
     for line in raw_text.splitlines():
@@ -612,11 +551,18 @@ def _parse_with_regex(parsed: ParsedConfig, raw_text: str) -> None:
                 parsed.hostname = m.group(1)
                 parsed.parsed_line_count += 1
                 continue
-            m = re.match(r"^vlan\s+([\d,\-\s]+)\s*$", stripped)
+            # ``vlan <ids>`` with the VLAN name either on the following
+            # indented ``name X`` line (modern IOS/NX-OS) or inline on the
+            # same line (legacy ``vlan database`` style ``vlan 10 name Users``).
+            m = re.match(r"^vlan\s+([\d,\-\s]+?)(?:\s+name\s+(\S+))?\s*$", stripped)
             if m:
                 current_vlan_block = _expand_vlan_list(m.group(1))
+                inline_name = m.group(2)
                 for vid in current_vlan_block:
-                    parsed.vlans.setdefault(vid, "")
+                    if inline_name:
+                        parsed.vlans[vid] = inline_name
+                    else:
+                        parsed.vlans.setdefault(vid, "")
                 parsed.parsed_line_count += 1
                 continue
             m = re.match(r"^(?:vrf\s+(?:context|definition)|ip\s+vrf|vrf)\s+(\S+)", stripped)
