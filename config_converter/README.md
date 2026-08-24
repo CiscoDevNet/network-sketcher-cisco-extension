@@ -7,13 +7,11 @@ concatenated in one file, or a mix of both) into a ready-to-run
 script — entirely from local files, with no live device connection needed at
 conversion time.
 
-> [!NOTE]
-> **Status: Phases 1a–5 complete.** The full pipeline (config parsing →
-> subnet-based topology inference → layout/tiering → inferred-device
-> synthesis → WAN/closed-environment classification → Network Sketcher
-> command generation) is implemented and verified end-to-end against a live
-> Network Sketcher instance. See `DESIGN.md` section 6 for the phase log and
-> section 5 for edge cases discovered during live verification.
+> Validated end-to-end against the bundled `sample1/` corpus (IOS / IOS-XE /
+> NX-OS / IOS-XR / ASA) and a live Network Sketcher instance. Treat the
+> output as a starting reference — links are inferred from IPv4 subnets, not
+> from CDP/LLDP. For parsing rules, topology inference, layout, and known
+> edge cases, see [`DESIGN.md`](DESIGN.md).
 
 <img alt="Topology reconstructed from running-config text files — L1 view" src="https://github.com/user-attachments/assets/9af782bf-2cb0-47d4-95c6-31329ca27492" />
 
