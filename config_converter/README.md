@@ -27,6 +27,7 @@ conversion time.
 | **Output** | `<stem>_config.txt` (Network Sketcher CLI commands, Phase 1–6) plus debug/audit artefacts |
 | **Dependencies** | Python 3.10+, **networkx** (required) — config parsing itself is stdlib-only |
 | **Platform connectivity** | None — purely local file I/O |
+| **Release** | Ver 0.5.1b |
 
 ### Supported platforms
 
@@ -34,7 +35,7 @@ conversion time.
 |-----------|--------|
 | IOS / IOS-XE | IOS-XE "Denali" and later (16.x/17.x). **Legacy IOS-XE 3.x is out of scope** (EoL); such configs may be misclassified as classic IOS. |
 | NX-OS | **Detection:** Nexus `show running-config` exports are recognised by the `!Command: show running-config` header and Nexus-only keywords (`vdc`, `feature nv overlay`, or other `feature` lines). **Extracted for topology:** SVIs, physical Ethernet ports, `mgmt0`, nested `hsrp <group>` virtual IPs (not IOS-style single-line `standby`), sequence-numbered `ip access-list` rules, `policy-map type qos` bandwidth-limit signals, external BGP peers, and `vpc domain` / `vpc peer-link` (vPC peer-links between two Nexus switches present in the same input batch). **Not in scope:** DCNM/FMC-managed objects, ACI fabric policy, or a full NX-OS QoS/policy model — only plain running-config text is read. |
-| IOS-XR | **Detection:** the `!! IOS XR Configuration` banner (or `rp/0/...`-style prompts near the file head) classifies the file as IOS-XR. **Extracted for topology:** `Bundle-Ether<n>` LAG interfaces (IOS-XR's Port-channel equivalent — not `Port-channel` naming), `MgmtEth0/RP0/CPU0/0`-style management ports (normalised for Network Sketcher), `ipv4 address` / `ipv4 access-group`, sequence-numbered `ipv4 access-list`, per-interface `vrf`, `bundle id` member ports, and nested `neighbor <ip>` / `remote-as <asn>` BGP blocks. Candidate (uncommitted) config is not supported — only finalised `show running-config` text. |
+| IOS-XR | **Detection:** the `!! IOS XR Configuration` banner (or `rp/0/...`-style prompts near the file head) classifies the file as IOS-XR. **Extracted for topology:** `Bundle-Ether<n>` LAG interfaces (kept as **`Bundle-Ether N`** on the Network Sketcher side — not rewritten to `Port-channel N`), `MgmtEth0/RP0/CPU0/0`-style management ports (normalised for Network Sketcher), `ipv4 address` / `ipv4 access-group`, sequence-numbered `ipv4 access-list`, per-interface `vrf`, `bundle id` member ports, and nested `neighbor <ip>` / `remote-as <asn>` BGP blocks. Candidate (uncommitted) config is not supported — only finalised `show running-config` text. |
 | ASA(FTD/FDM) | ASA, FMC-managed FTD, and FDM-managed FTD share one ASA/LINA parsing path, displayed as **"ASA(FTD/FDM)"** |
 
 #### Out of scope (by design)
@@ -239,6 +240,18 @@ these automatically:
 
 ## Changelog
 
+### Ver 0.5.1b (2026-09-03)
+
+- **Bug fix (IOS-XR LAG names)**: `add portchannel_bulk` now uses the logical
+  interface's normalised name (`Bundle-Ether N` on IOS-XR, `Port-channel N`
+  on IOS/NX-OS) so it matches `add ip_address_bulk`. Previously the bulk
+  command always created `Port-channel N`, which left `EDGE-XR01`'s
+  `Bundle-Ether 1` IP assignment failing on the live engine (`L3 interface
+  not found`). Dummy-side mirrors stay `Port-channel N`. See `DESIGN.md`
+  risk #32.
+
+### Earlier
+
 - **Config consolidation**: removed `phase5_scenarios_config.json` (duplicate of
   the main config with only `site_scoping: true`). Cross-site behaviour is now
   handled by **auto-detecting** multi-subdirectory layouts in `convert.py`.
@@ -257,7 +270,7 @@ these automatically:
   waypoint devices horizontal in one area. See `DESIGN.md` §4.7.2.
 - **Bug fixes**: Port-channel L2 VLAN symmetry, trunk-all-VLAN fallback, vPC
   peer-link pairing, Dummy-side Port-channel mirroring, and others — see
-  `DESIGN.md` section 5 for the full risk register (#17–#30).
+  `DESIGN.md` section 5 for the full risk register (#17–#32).
 
 ---
 

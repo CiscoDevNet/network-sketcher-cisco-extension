@@ -8,7 +8,11 @@ script — no CML server required.
 > The Network Sketcher Offline edition has a built-in CML import, but it covers
 > **Layer 1 only** (devices and physical links). `cml_converter` is the
 > **extended version that also reconstructs Layer 2 and Layer 3** (VLANs, SVIs,
-> sub-interfaces, port-channels, IP addresses and VRFs) from the running-configs.
+> sub-interfaces, port-channels / IOS-XR Bundle-Ether, IP addresses and VRFs)
+> from the running-configs. IOS-XR running-configs (`ipv4 address`, `bundle id`,
+> `MgmtEth`, per-interface `vrf`) are parsed to the same L2/L3 facts as
+> `config_converter`; LAG names stay `Bundle-Ether N` (not rewritten to
+> `Port-channel N`).
 
 <img alt="CML lab converted into a Network Sketcher L1 diagram" src="https://github.com/user-attachments/assets/3fc59bf2-0ec9-43d1-986d-24dd63734c9c" />
 
@@ -30,6 +34,7 @@ script — no CML server required.
 | **Output** | `ns_commands.txt` ready for Network Sketcher `run_commands`, plus debug/audit artefacts |
 | **Dependencies** | Python 3.10+, PyYAML — running-config parsing itself is stdlib-only |
 | **CML connectivity** | None — purely local file I/O |
+| **Release** | Ver 0.5.1b |
 
 ## Quick Start
 
@@ -118,6 +123,20 @@ cml_converter/
 ```
 
 ## Changelog
+
+### Ver 0.5.1b (2026-09-03)
+
+- **IOS-XR running-config L2/L3**: `config_parser.py` now recognises
+  `interface Bundle-Ether<n>`, `ipv4 address`, `bundle id <n> mode <mode>`,
+  `MgmtEth…`, and the bare per-interface / top-level `vrf <name>` form.
+  `detect_os_family()` classifies IOS-XR **before** the IOS-XE
+  `interface gigabitethernet0/0` substring (XR's `GigabitEthernet0/0/0/0`
+  would otherwise match that prefix). `normalise_port_name()` keeps the LAG
+  as `Bundle-Ether N` (Network Sketcher accepts that token; rewriting it to
+  `Port-channel N` used to leave `add ip_address_bulk` targeting a port
+  `add portchannel_bulk` never created). `MgmtEth0/RP0/CPU0/0` becomes
+  `MgmtEth 0/0/0/0` so the engine's port-name sort key does not warn on
+  `RP0`/`CPU0`.
 
 - **Bug fix**: `topology_mapper.py`'s `assign_areas_and_rows()` passed a
   `default_color=` keyword argument to `NSDevice(...)` (intended to render an

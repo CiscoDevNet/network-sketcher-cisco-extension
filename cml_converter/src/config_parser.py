@@ -1,7 +1,7 @@
 # Copyright 2026 Cisco Systems, Inc. and its affiliates
 # SPDX-License-Identifier: Apache-2.0
 
-"""Parse Cisco NX-OS / IOS / IOS-XE running-configs into a normalised model.
+"""Parse Cisco NX-OS / IOS / IOS-XE / IOS-XR running-configs into a normalised model.
 
 The parser captures what NS can express directly (VLANs, SVIs, Loopbacks,
 L3-routed physical interfaces, sub-interfaces, port-channels, VRFs, trunk
@@ -102,10 +102,10 @@ class ParsedConfig:
 _IFACE_KIND_RE = [
     (re.compile(r"^vl(?:an)?(?=\s*\d)", re.IGNORECASE), "svi"),
     (re.compile(r"^(?:loopback|loop|lo)(?=\s*\d)", re.IGNORECASE), "loopback"),
-    (re.compile(r"^(?:management|mgmt)(?=\s*\d)", re.IGNORECASE), "mgmt"),
+    (re.compile(r"^(?:management|mgmt|mgmteth)(?=\s*\d)", re.IGNORECASE), "mgmt"),
     (re.compile(r"^tun(?:nel)?(?=\s*\d)", re.IGNORECASE), "tunnel"),
     (re.compile(r"^nve(?=\s*\d)", re.IGNORECASE), "tunnel"),
-    (re.compile(r"^(?:port-?channel|po)(?=\s*\d)", re.IGNORECASE), "portchannel"),
+    (re.compile(r"^(?:port-?channel|po|bundle-?ether|be)(?=\s*\d)", re.IGNORECASE), "portchannel"),
     (re.compile(
         r"^(?:twentyfivegige|twe|fortygigabitethernet|fortygige|fo|"
         r"hundredgige|hu|tengigabitethernet|tengige|te|"
@@ -197,21 +197,24 @@ def _line_is_ignored(stripped: str) -> bool:
 
 def detect_os_family(raw_text: str) -> str:
     """Heuristic OS family detection from a single running-config blob."""
-    head = raw_text[:2000].lower()
-    if "vdc " in head or "feature nv overlay" in head or "feature ospf" in head and "nxos" in head:
-        return "nxos"
-    if "version 10" in head and ("nv overlay" in head or "vdc " in head):
-        return "nxos"
-    if "interface gigabitethernet0/0" in head or "version 16" in head or "platform " in head and "version 17" in head:
-        return "iosxe"
-    if "ios xr" in head or "rp/" in head:
+    head = raw_text[:2000]
+    head_lower = head.lower()
+    # IOS-XR first: ``interface GigabitEthernet0/0/0/0`` would otherwise
+    # match the IOS-XE ``interface gigabitethernet0/0`` substring below.
+    if "!! ios xr configuration" in head_lower or re.search(r"^\s*rp/\d+", head, re.MULTILINE) or "ios xr" in head_lower:
         return "iosxr"
-    if "version 15" in head and "ios" in head:
+    if "vdc " in head_lower or "feature nv overlay" in head_lower or "feature ospf" in head_lower and "nxos" in head_lower:
+        return "nxos"
+    if "version 10" in head_lower and ("nv overlay" in head_lower or "vdc " in head_lower):
+        return "nxos"
+    if "interface gigabitethernet0/0" in head_lower or "version 16" in head_lower or "platform " in head_lower and "version 17" in head_lower:
+        return "iosxe"
+    if "version 15" in head_lower and "ios" in head_lower:
         return "ios"
     # Best-effort fallbacks
-    if "feature " in head:
+    if "feature " in head_lower:
         return "nxos"
-    if "version " in head and "boot-start-marker" in head:
+    if "version " in head_lower and "boot-start-marker" in head_lower:
         return "iosxe"
     return "ios"
 
@@ -289,7 +292,7 @@ def _parse_top_level(parsed: ParsedConfig, raw_text: str) -> None:
                         parsed.vlans.setdefault(vid, "")
                 parsed.parsed_line_count += 1
                 continue
-            m = re.match(r"^(?:vrf\s+(?:context|definition)|ip\s+vrf)\s+(\S+)", stripped)
+            m = re.match(r"^(?:vrf\s+(?:context|definition)|ip\s+vrf|vrf)\s+(\S+)", stripped)
             if m:
                 parsed.vrfs.add(m.group(1))
                 parsed.parsed_line_count += 1
@@ -382,18 +385,32 @@ def _consume_iface_line(stripped: str, iface: ParsedInterface) -> bool:
     if m:
         iface.vrf = m.group(1)
         return True
+    # IOS-XR assigns an interface's VRF with a bare "vrf <name>" child line
+    # (no "member"/"forwarding" keyword). Safe here because this function
+    # only sees lines already known to be inside an interface stanza.
+    m = re.match(r"^vrf\s+(\S+)$", stripped, re.IGNORECASE)
+    if m:
+        iface.vrf = m.group(1)
+        return True
 
-    m = re.match(r"^ip\s+address\s+(.+?)(?:\s+secondary)?$", stripped)
+    m = re.match(r"^(?:ip|ipv4)\s+address\s+(.+?)(?:\s+secondary)?$", stripped, re.IGNORECASE)
     if m:
         addr = _parse_ip_cidr(m.group(1))
         if addr:
-            if stripped.endswith(" secondary"):
+            if stripped.lower().endswith(" secondary"):
                 iface.ipv4_secondary.append(addr)
             else:
                 iface.ipv4.append(addr)
             return True
 
     m = re.match(r"^channel-group\s+(\d+)(?:\s+mode\s+(\S+))?$", stripped)
+    if m:
+        iface.channel_group = int(m.group(1))
+        iface.channel_mode = m.group(2)
+        return True
+    # IOS-XR LAG membership: "bundle id <n> mode <mode>" is the equivalent
+    # of IOS/NX-OS "channel-group <n> mode <mode>".
+    m = re.match(r"^bundle\s+id\s+(\d+)(?:\s+mode\s+(\S+))?$", stripped, re.IGNORECASE)
     if m:
         iface.channel_group = int(m.group(1))
         iface.channel_mode = m.group(2)
@@ -418,7 +435,8 @@ def _consume_iface_line(stripped: str, iface: ParsedInterface) -> bool:
     # but don't need to keep its semantics" -- still counted as parsed.
     if stripped.startswith((
         "ip ospf ", "ip pim", "ip nat", "ip helper",
-        "ip access-group", "ipv6 ", "no ipv6 ",
+        "ip access-group", "ipv4 access-group", "ipv6 ", "no ipv6 ",
+        "ipv4 ", "no ipv4 ",
         "service-policy", "storm-control", "media-type",
         "negotiation", "duplex", "load-interval", "lldp ",
         "logging event", "spanning-tree", "no spanning-tree", "bfd",

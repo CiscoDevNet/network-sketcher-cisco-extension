@@ -2381,6 +2381,13 @@ def apply_parsed_configs(
             continue
 
         po_members: Dict[int, List[str]] = {}
+        po_logical_names: Dict[int, str] = {}
+        # Logical LAG name per channel-group id (Port-channel N or
+        # Bundle-Ether N). ``add portchannel_bulk`` must use this same
+        # name as ``add ip_address_bulk`` / ``add l2_segment_bulk``;
+        # hardcoding ``Port-channel {id}`` left IOS-XR Bundle-Ether IPs
+        # targeting a port the engine never created (Qiita report,
+        # DESIGN.md section 5 risk #32).
 
         # DESIGN.md section 5 risk #26: precompute which channel-group ids
         # have >=1 physical member BEFORE the main loop below (the logical
@@ -2485,6 +2492,8 @@ def apply_parsed_configs(
                 # two conditions are not mutually exclusive; either one
                 # alone is sufficient.
                 po_id_match = re.search(r"(\d+)$", iname)
+                if po_id_match is not None:
+                    po_logical_names[int(po_id_match.group(1))] = ns_port
                 po_bulk_registered = (
                     po_id_match is not None
                     and int(po_id_match.group(1)) in channel_groups_with_members
@@ -2671,7 +2680,7 @@ def apply_parsed_configs(
             model.port_channels.append(NSPortChannel(
                 device=label,
                 physical_ports=sorted(set(members)),
-                portchannel_name=f"Port-channel {po_id}",
+                portchannel_name=po_logical_names.get(po_id, f"Port-channel {po_id}"),
             ))
 
         if cfg_parsed.routing_summary_lines:

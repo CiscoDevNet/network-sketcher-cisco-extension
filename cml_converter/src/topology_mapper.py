@@ -180,6 +180,11 @@ _IFACE_TYPE_PATTERNS = [
     (re.compile(r"^Eth(?=\d)", re.IGNORECASE), "Ethernet"),
     (re.compile(r"^Et(?=\d)", re.IGNORECASE), "Ethernet"),
     (re.compile(r"^Management", re.IGNORECASE), "Management"),
+    # IOS-XR management interface -- "MgmtEth<slot>/RP<n>/CPU<n>/<port>" is
+    # its own type token and MUST be checked BEFORE the generic "^Mgmt"
+    # pattern (otherwise "Mgmt" is stripped and the remainder becomes the
+    # malformed "mgmt Eth0/RP0/CPU0/0").
+    (re.compile(r"^MgmtEth", re.IGNORECASE), "MgmtEth"),
     (re.compile(r"^Mgmt", re.IGNORECASE), "mgmt"),
     (re.compile(r"^mgmt", re.IGNORECASE), "mgmt"),
     (re.compile(r"^Loopback", re.IGNORECASE), "Loopback"),
@@ -189,6 +194,10 @@ _IFACE_TYPE_PATTERNS = [
     (re.compile(r"^Vl(?=\d)", re.IGNORECASE), "Vlan"),
     (re.compile(r"^Port-?channel", re.IGNORECASE), "Port-channel"),
     (re.compile(r"^Po(?=\d)", re.IGNORECASE), "Port-channel"),
+    # IOS-XR LAG: NS rejects "Bundle-Ether1" (no space) but accepts
+    # "Bundle-Ether 1". Keep the XR name; do not rewrite it to Port-channel.
+    (re.compile(r"^Bundle-?Ether", re.IGNORECASE), "Bundle-Ether"),
+    (re.compile(r"^BE(?=\d)", re.IGNORECASE), "Bundle-Ether"),
     (re.compile(r"^Serial", re.IGNORECASE), "Serial"),
     (re.compile(r"^Ser(?=\d)", re.IGNORECASE), "Serial"),
     (re.compile(r"^Se(?=\d)", re.IGNORECASE), "Serial"),
@@ -213,6 +222,21 @@ _PSEUDO_PORT_MAP = {
 _LINUX_NIC_RE = re.compile(r"^(?:eth\d|ens\d|enp\d|eno\d|em\d|enx[0-9a-f])", re.IGNORECASE)
 
 
+def _numericise_path_segments(remainder: str) -> str:
+    """Strip non-digit characters out of each ``/``-separated path segment.
+
+    The Network Sketcher engine's port-name sort key walks EVERY
+    ``/``-separated remainder segment and calls ``int()`` on each one.
+    IOS-XR ``MgmtEth<slot>/RP<n>/CPU<n>/<port>`` therefore warns on ``RP0``
+    / ``CPU0`` unless those letters are dropped. Digits are kept so dual-RP
+    chassis still distinguish RP0 vs RP1. A segment with no digits falls
+    back to ``"0"`` so the path shape is preserved.
+    """
+    segments = remainder.split("/")
+    numeric_segments = [re.sub(r"\D", "", seg) or "0" for seg in segments]
+    return "/".join(numeric_segments)
+
+
 def normalise_port_name(raw: str) -> str:
     """Convert a raw interface name into the NS convention (a single space
     between the type token and the number portion).
@@ -231,6 +255,8 @@ def normalise_port_name(raw: str) -> str:
         GigabitEthernet0/2.20  -> GigabitEthernet 0/2.20  (sub-interface)
         mgmt0                  -> mgmt 0
         Management0/0          -> Management 0/0
+        Bundle-Ether1 / BE1    -> Bundle-Ether 1
+        MgmtEth0/RP0/CPU0/0    -> MgmtEth 0/0/0/0  (IOS-XR; RP/CPU letters dropped)
         eth0 / ens3 / enp0s2   -> Ethernet 0 / Ethernet 3 / Ethernet 2  (Linux)
         port0 / port           -> Ethernet 0  (unmanaged-switch / external connector)
         service-port           -> Ethernet 0  (vWLC)
@@ -261,6 +287,8 @@ def normalise_port_name(raw: str) -> str:
         m = pat.match(raw)
         if m:
             remainder = raw[m.end():].lstrip()
+            if canonical == "MgmtEth" and remainder:
+                remainder = _numericise_path_segments(remainder)
             return f"{canonical} {remainder}" if remainder else canonical
 
     return raw  # unknown form: leave as-is (NS may still reject it)
@@ -901,8 +929,9 @@ def apply_parsed_configs(
         # VLAN-table concept independent of an SVI binding. So we just count.
         st["vlans"] = len(cfg.vlans)
 
-        # Track port-channel members for the portchannel_bulk call.
+        # Track port-channel / Bundle-Ether members for the portchannel_bulk call.
         po_members: Dict[int, List[str]] = {}
+        po_logical_names: Dict[int, str] = {}
 
         for iname, iface in cfg.interfaces.items():
             ns_port = normalise_port_name(iname)
@@ -940,7 +969,10 @@ def apply_parsed_configs(
                     st["loopback"] += 1
 
             elif iface.kind == "portchannel":
-                # The port-channel virtual interface itself.
+                # The port-channel / Bundle-Ether virtual interface itself.
+                po_id_match = re.search(r"(\d+)$", iname)
+                if po_id_match is not None:
+                    po_logical_names[int(po_id_match.group(1))] = ns_port
                 if iface.ipv4:
                     model.ip_assignments.append(NSIPAssignment(
                         device=label, port=ns_port,
@@ -1035,9 +1067,11 @@ def apply_parsed_configs(
 
             # Tunnel / nve / others: routing-summary text only.
 
-        # Emit port-channels we collected.
+        # Emit port-channels we collected. Use the logical interface's
+        # normalised name (Port-channel N or Bundle-Ether N) so
+        # add portchannel_bulk and add ip_address_bulk target the same port.
         for po_id, members in po_members.items():
-            pc_name = f"Port-channel {po_id}"
+            pc_name = po_logical_names.get(po_id, f"Port-channel {po_id}")
             model.port_channels.append(NSPortChannel(
                 device=label,
                 physical_ports=sorted(set(members)),

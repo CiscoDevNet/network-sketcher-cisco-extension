@@ -61,10 +61,12 @@ the `user-network-sketcher` MCP server (`create_empty_master` ->
 `get_ai_context` -> `run_commands` for all 6 generated NS commands ->
 `build_default_outputs`), and the exported L1 diagram visually confirms the
 topology described above, including all `Dummy 0`-`Dummy 6` port names and
-the `Bundle-Ether 1` port. See DESIGN.md section 6 (Phase 1e row) and section
-5 (risks #12, #15, #16) for the full verification narrative and the two bugs
-this live-engine test uncovered and fixed (`Bundle-Ether` port normalisation,
-`stencil_mapper` Model-string quoting).
+the `Bundle-Ether 1` port (`add portchannel_bulk` and `add ip_address_bulk`
+now use the same `Bundle-Ether 1` name; see DESIGN.md risk #32). See DESIGN.md
+section 6 (Phase 1e row) and section 5 (risks #12, #15, #16, #32) for the
+full verification narrative and the bugs this live-engine test uncovered
+and fixed (`Bundle-Ether` port normalisation, `stencil_mapper` Model-string
+quoting, and LAG name alignment with IP assignment).
 
 > [!NOTE]
 > **Post-Phase 2 update**: the counts above (`l1_links=16`, synthetic

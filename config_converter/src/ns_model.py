@@ -50,10 +50,11 @@ that it applies ONLY to that canonical type, to eliminate a live-engine
 ``Could not convert '<segment>' to integer`` port-name sort-key warning that
 IOS-XR's alpha+digit ``RP0``/``CPU0`` path segments would otherwise trigger
 (confirmed via MCP live-engine verification, config_converter has no other
-OS family with this naming shape). Same rule as above applies: this is a
-config_converter-LOCAL change only, the other five copies of this file keep
-their original, unmodified ``_IFACE_TYPE_PATTERNS``/``normalise_port_name()``
-since none of them target IOS-XR configs today.
+OS family with this naming shape). ``cml_converter`` now ports the same
+``MgmtEth`` / ``Bundle-Ether`` / ``_numericise_path_segments()`` handling
+independently in ``cml_converter/src/topology_mapper.py`` (no shared module).
+The remaining converters (aci / catc / nd / netbox / template) keep their
+original, unmodified ``_IFACE_TYPE_PATTERNS`` / ``normalise_port_name()``.
 
 Do NOT add any OTHER config_converter-specific logic here — anything specific
 to parsing running-configs, inferring L1 links from IP subnets, WAN
