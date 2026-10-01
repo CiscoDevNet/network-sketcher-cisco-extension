@@ -86,8 +86,9 @@ Noise groups (`Broadcast Components`, `Multicast`, `IPv6 Components`,
 `Packet Reply`, `To be investigated`) and non-routable IPs are excluded by
 default — toggle with `exclude_noise_groups` in the config. Assets whose
 Group cell is empty are kept. They are split by IPv4 /24 and each prefix
-becomes its own group, named like `dummy_(192.168.50.0/24)`. That name is
-classified like any other group: keyword match, then majority Device Type,
+becomes its own group, named like `dummy_(192.168.50.0_24)`. A `/` in any
+area name is written as `_`. The resulting name is classified like any other
+group: keyword match, then majority Device Type,
 or `group_zone_override` if the dummy name is pinned there.
 
 ## CPwE infrastructure synthesis

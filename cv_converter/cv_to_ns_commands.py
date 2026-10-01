@@ -253,10 +253,12 @@ def norm(s: Optional[str]) -> str:
 def dummy_group_name(ip: str) -> str:
     """Label for an asset Cyber Vision left ungrouped: one group per IPv4 /24.
 
-    Example: 192.168.50.10 -> ``dummy_(192.168.50.0/24)``.
+    The prefix slash is written as ``_`` because this name becomes an area,
+    and area names are used in file names.
+    Example: 192.168.50.10 -> ``dummy_(192.168.50.0_24)``.
     """
     network = ipaddress.ip_network(f"{norm(ip)}/24", strict=False)
-    return f"dummy_({network})"
+    return f"dummy_({network.network_address}_{network.prefixlen})"
 
 
 def is_real_ip(ip: str) -> bool:
@@ -685,7 +687,7 @@ def convert(nodes_path: Optional[str], acts_path: Optional[str], out_dir: str, c
     cell_area_name: Dict[str, str] = {}
     used_area = {AREA_ENTERPRISE, AREA_IDMZ, AREA_INDUSTRIAL}
     for grp in cell_groups:
-        nm = sanitize(grp) or "Cell"
+        nm = sanitize(grp).replace("/", "_") or "Cell"
         cand = nm
         n = 2
         while cand in used_area:
