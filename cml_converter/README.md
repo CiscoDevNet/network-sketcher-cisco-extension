@@ -82,7 +82,7 @@ The two WayPoint colours separate **observed** WayPoints (blue, backed by a real
 
 Two further fixed cell colours appear in every device row (set by the shared `ns_command_builder`, not role-based): the **Model** column is pink `[255, 183, 219]` and the **OS** column is light blue `[200, 230, 255]`.
 
-**In cml_converter:** every device in a CML lab is observed — including an `external_connector` node (the bridge to the host network), which is a real node the user placed in the lab, so it renders **light blue**, not gray. Network gear (Router / L3Switch / Switch / Firewall / WLC / AP) is **green**, servers are **red**, and PC / Phone endpoints are **yellow**. Gray is reserved for devices the converter itself would invent — cml_converter has no such case today, since every device comes from a real CML lab node.
+**In cml_converter:** a node is a Waypoint only when its Attribute **Model** contains `External Connector` (the CML `external_connector` bridge to the host network). It renders **light blue**. Every other node is a normal device, including a router or switch whose name contains wan, internet, or cloud. Network gear (Router / L3Switch / Switch / Firewall / WLC / AP) is **green**, servers are **red**, and PC / Phone endpoints are **yellow**.
 
 ## Running the output in Network Sketcher
 
@@ -125,6 +125,12 @@ cml_converter/
 ## Changelog
 
 ### Ver 0.5.1b (2026-09-03)
+
+- **Waypoints**: only a node whose Attribute Model contains `External Connector`
+  is a Waypoint (light blue, `*_wp_` area). Every other node is a normal
+  device, including routers and switches whose labels contain wan, internet,
+  or cloud.
+
 
 - **IOS-XR running-config L2/L3**: `config_parser.py` now recognises
   `interface Bundle-Ether<n>`, `ipv4 address`, `bundle id <n> mode <mode>`,

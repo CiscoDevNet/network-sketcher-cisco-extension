@@ -40,7 +40,10 @@ Crossing avoidance (RULE 0.5 — horizontal ordering within each tier):
 Area policy (RULE 3):
   - Group nodes by shared CML "site" tag (e.g. site1, site2, wan-isn).
   - If a node has multiple site-like tags, prefer the most-specific one (`site*`).
-  - WAN / inter-site fabric is its own waypoint area (`*_wp_`).
+  - Only a node whose Attribute Model contains "External Connector" is a
+    waypoint. It is placed in a `*_wp_` area. Every other node, including a
+    router whose label contains wan / internet / cloud, stays a normal device
+    in a normal area.
   - Nodes with no usable tag fall into the catch-all area `default`.
 """
 from __future__ import annotations
@@ -55,8 +58,8 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
 from .stencil_mapper import (
-    NS_AP, NS_CLOUD, NS_FIREWALL, NS_L3SWITCH, NS_PC, NS_ROUTER,
-    NS_SERVER, NS_SWITCH, NS_WLC, StencilMapping,
+    NS_AP, NS_FIREWALL, NS_L3SWITCH, NS_PC, NS_ROUTER,
+    NS_SERVER, NS_SWITCH, NS_WLC, StencilMapping, model_is_external_connector,
 )
 
 
@@ -355,17 +358,9 @@ def _index_cml_interfaces(nodes: List[Dict[str, Any]]) -> Dict[str, Any]:
 # Area / hierarchy assignment
 # ---------------------------------------------------------------------------
 
-# Raw area names (before the build_area_layout `*_wp_` promotion) that denote a
-# WAN / Internet / cloud waypoint area. Inter-area links that touch one of these
-# are legitimate "device-to-waypoint" connections (RULE 3); links between two
-# NON-waypoint areas are not allowed by the engine and signal an over-eager area
-# split of directly-cabled devices (see _coalesce_directly_linked_areas).
-_RAW_WAYPOINT_AREAS = {"wan-isn", "wan", "internet", "cloud"}
-
 SITE_TAG_RE = re.compile(r"^(site\d+|wan-?isn|wan|core|dc\d+|pod\d+|hq|branch\d+|campus)$", re.IGNORECASE)
 ENDPOINT_NDEF = {"alpine", "ubuntu", "centos", "tiny-linux", "server", "desktop",
                   "win-desktop", "win-server", "wireless-client"}
-WAYPOINT_NDEF = {"external_connector"}
 
 # NS's native WayPoint colour (light blue), used for an OBSERVED WayPoint: an
 # 'external_connector' is a real node the user placed in the CML lab (it has
@@ -399,7 +394,7 @@ def _pick_row(node: Dict[str, Any], stencil: StencilMapping) -> int:
     nd = (node.get("node_definition") or "").lower()
     label = (node.get("label", "") or "").lower()
 
-    if stencil.stencil_type == NS_CLOUD or nd in WAYPOINT_NDEF or "wan" in label or "isn" in label:
+    if model_is_external_connector(stencil.model):
         return 0
     if any(t in tags for t in ["bgw", "border", "edge"]) or "bgw" in label or "border" in label:
         return 1
@@ -435,7 +430,7 @@ def assign_areas_and_rows(
         area = _pick_area(n)
         row = _pick_row(n, st)
         is_endpoint = st.stencil_type in {NS_SERVER, NS_PC} or (n.get("node_definition") or "") in ENDPOINT_NDEF
-        is_waypoint_ndef = (n.get("node_definition") or "") in WAYPOINT_NDEF
+        is_waypoint = model_is_external_connector(st.model)
         devices[label] = NSDevice(
             name=label,
             area=area,
@@ -444,7 +439,7 @@ def assign_areas_and_rows(
             is_endpoint=is_endpoint,
             x=_coerce_coord(n.get("x")),
             y=_coerce_coord(n.get("y")),
-            default_color=_OBSERVED_WAYPOINT if is_waypoint_ndef else None,
+            default_color=_OBSERVED_WAYPOINT if is_waypoint else None,
         )
     return devices
 
@@ -461,6 +456,24 @@ def _coerce_coord(value: Any) -> Optional[float]:
         return None
 
 
+def _separate_external_connectors(devices: Dict[str, NSDevice]) -> None:
+    """Move External Connectors out of an area they share with ordinary devices.
+
+    A waypoint has to live in a ``*_wp_`` area, and a normal device must not.
+    When both share a CML area, the connectors move to ``<area>-ext``, which
+    ``build_area_layout`` then renders as ``<area>-ext_wp_``.
+    """
+    by_area: Dict[str, List[NSDevice]] = defaultdict(list)
+    for device in devices.values():
+        by_area[device.area].append(device)
+    for area, members in by_area.items():
+        connectors = [d for d in members if model_is_external_connector(d.stencil.model)]
+        if not connectors or len(connectors) == len(members):
+            continue
+        for device in connectors:
+            device.area = f"{area}-ext"
+
+
 def _coalesce_directly_linked_areas(
     devices: Dict[str, NSDevice],
     l1_links: List[NSL1Link],
@@ -470,13 +483,12 @@ def _coalesce_directly_linked_areas(
 
     NS forbids a direct L1 link between two devices that live in different
     *non-waypoint* areas ("Device-to-Device (different areas) | No | Must use
-    Waypoint"). A genuine inter-site link in CML is modelled through a WAN /
-    cloud / external-connector node, which we already route into a ``*_wp_``
-    waypoint area — those links are valid and left untouched. The only way two
-    plain devices end up cabled across non-waypoint areas is an over-eager area
-    split (e.g. a host labelled ``h1`` guessed into ``site1`` while its access
-    switch stayed in ``default``). Since the cable proves they share a physical
-    segment, the RULE-3-correct fix is to put them in the same area.
+    Waypoint"). The only waypoint is a node whose Attribute Model contains
+    "External Connector". A link that touches one of those is left untouched.
+    A link between two ordinary devices in different areas is an over-eager
+    area split (e.g. a host labelled ``h1`` guessed into ``site1`` while its
+    access switch stayed in ``default``). Since the cable proves they share a
+    physical segment, the RULE-3-correct fix is to put them in the same area.
 
     Implementation: union-find over every direct device-to-device link whose
     endpoints are both in non-waypoint areas; each connected component that
@@ -500,7 +512,7 @@ def _coalesce_directly_linked_areas(
             parent[ra] = rb
 
     def is_wp(name: str) -> bool:
-        return devices[name].area in _RAW_WAYPOINT_AREAS
+        return model_is_external_connector(devices[name].stencil.model)
 
     for lk in l1_links:
         a, b = lk.a_device, lk.b_device
@@ -546,20 +558,22 @@ def build_area_layout(
             left-right sequence inside each row for L1 crossing avoidance
             (RULE 0.5) via ``_place_columns``. When ``l1_links`` is omitted the
             rows fall back to a stable name sort.
-      - Waypoint areas (`wan-isn`) become `*_wp_` placed between site areas if
-        present.
+      - An area becomes ``*_wp_`` only when every device in it is an External
+        Connector. A wan-labelled router stays in a normal area.
     """
+    _separate_external_connectors(devices)
     by_area: Dict[str, List[NSDevice]] = {}
     for d in devices.values():
         by_area.setdefault(d.area, []).append(d)
 
     ordered_areas: List[str] = sorted(by_area.keys(), key=_area_sort_key)
-    # Promote wan-isn-style areas to waypoint naming so NS treats them as clouds.
+    # Only an area made entirely of External Connectors is a waypoint area.
     rendered_areas: List[str] = []
     name_map: Dict[str, str] = {}
     for a in ordered_areas:
-        if a in _RAW_WAYPOINT_AREAS:
-            rendered = f"{a}_wp_"
+        members = by_area[a]
+        if members and all(model_is_external_connector(d.stencil.model) for d in members):
+            rendered = a if a.endswith("_wp_") else f"{a}_wp_"
         else:
             rendered = a
         rendered_areas.append(rendered)

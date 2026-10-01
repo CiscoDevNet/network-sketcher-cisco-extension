@@ -33,7 +33,10 @@ from .topology_mapper import (
     NSDevice, NSL1Link, NSL2Segment, NSIPAssignment,
     NSModel, NSPortChannel, NSSubInterface, NSVirtualPort, normalise_port_name,
 )
-from .stencil_mapper import NS_CLOUD, NS_PC, NS_PHONE, NS_SERVER, StencilMapping
+from .stencil_mapper import (
+    NS_CLOUD, NS_PC, NS_PHONE, NS_SERVER, StencilMapping,
+    model_is_external_connector,
+)
 
 
 # RULE 16 colour palette (matches the reference examples in the AI context).
@@ -44,7 +47,7 @@ from .stencil_mapper import NS_CLOUD, NS_PC, NS_PHONE, NS_SERVER, StencilMapping
 _COLOR_NET = (235, 241, 222)       # light green  — real network gear
 _COLOR_SERVER = (255, 204, 204)    # light red    — servers
 _COLOR_PC = (255, 255, 204)        # light yellow — client PCs / phones
-_COLOR_WAYPOINT = (200, 200, 200)  # light gray   — WAN/Internet/cloud waypoint (no real device)
+_OBSERVED_WAYPOINT_BLUE = (220, 230, 242)  # light blue — External Connector waypoint
 _COLOR_MODEL = (255, 183, 219)
 _COLOR_OS = (200, 230, 255)
 _COLOR_STENCIL = (220, 230, 242)
@@ -271,7 +274,7 @@ def cmd_rename_attribute_bulk(model: NSModel) -> str:
     Column layout:
       0 Device Name
       1 Default      (role-based colour: green=net gear, red=Server, yellow=PC/Phone;
-                      'WayPoint' light-gray for WAN/Internet/cloud waypoints)
+                      'WayPoint' light blue only when Model contains External Connector)
       2 Model        (long human description)
       3 OS           (NX-OS / IOS-XE / IOS / SD-WAN / ...)
       4 Stencil Type (RULE 16: Router / L3Switch / Switch / Firewall / WLC / AP / Server / Cloud / PC)
@@ -287,9 +290,10 @@ def cmd_rename_attribute_bulk(model: NSModel) -> str:
     )
     rows: List[str] = []
     for name, d in sorted(model.devices.items()):
-        is_waypoint_area = d.area.endswith("_wp_") or d.stencil.stencil_type == NS_CLOUD
-        if is_waypoint_area:
-            token, rgb = "WayPoint", _COLOR_WAYPOINT
+        # Waypoint is the Model text, not the area name. A router that landed
+        # in a wan-labelled area is still a normal device.
+        if model_is_external_connector(d.stencil.model):
+            token, rgb = "WayPoint", _OBSERVED_WAYPOINT_BLUE
         elif d.stencil.stencil_type == NS_SERVER:
             token, rgb = "DEVICE", _COLOR_SERVER
         elif d.stencil.stencil_type in (NS_PC, NS_PHONE):
