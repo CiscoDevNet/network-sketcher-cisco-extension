@@ -13,8 +13,8 @@
     },
 
     "noise_groups": {
-        "value": ["Broadcast Components", "IPv6 Components", "Packet Reply", "Multicast", "To be investigated", ""],
-        "description": "Cyber Vision group names treated as non-asset noise and excluded when exclude_noise_groups is true. The empty string '' matches ungrouped components.",
+        "value": ["Broadcast Components", "IPv6 Components", "Packet Reply", "Multicast", "To be investigated"],
+        "description": "Cyber Vision group names treated as non-asset noise and excluded when exclude_noise_groups is true. A blank Group is not noise: those assets are drawn together as the group Ungrouped.",
         "sample": ["Broadcast Components", "Multicast"]
     },
 
