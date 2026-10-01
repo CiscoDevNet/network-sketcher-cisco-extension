@@ -373,6 +373,13 @@ def fetch_model(client: VmanageClient) -> Dict[str, Any]:
     return out
 
 
+def probe_access(client: VmanageClient) -> None:
+    """Confirm that the authenticated account can read device inventory."""
+    response = client.get("/dataservice/device")
+    if not isinstance(response, dict) or not isinstance(response.get("data"), list):
+        raise RuntimeError("device inventory returned an unexpected response")
+
+
 def main(argv: Optional[list] = None) -> int:
     p = argparse.ArgumentParser(
         description="Pull a Cisco Catalyst SD-WAN Manager (vManage) device/interface model "
@@ -388,6 +395,9 @@ def main(argv: Optional[list] = None) -> int:
                    help="Enforce TLS cert verification (vManage uses self-signed certs by default in a lab).")
     p.add_argument("--out", default="vmanage_export.json",
                    help="Output JSON path (default: vmanage_export.json).")
+    p.add_argument("--probe", action="store_true",
+                   help="Authenticate and perform one lightweight read-only API check, "
+                        "then exit without writing an export.")
     args = p.parse_args(argv)
 
     password = args.password or os.environ.get("VMANAGE_PASSWORD")
@@ -403,6 +413,15 @@ def main(argv: Optional[list] = None) -> int:
         print(f"[ERROR] vManage login failed: {exc}", file=sys.stderr)
         return 1
     print(f"[ok] authenticated to {args.host} as {args.user}", file=sys.stderr)
+
+    if args.probe:
+        try:
+            probe_access(client)
+        except (urllib.error.URLError, RuntimeError, KeyError, TypeError, ValueError) as exc:
+            print(f"[ERROR] vManage access probe failed: {exc}", file=sys.stderr)
+            return 1
+        print("[ok] access probe succeeded (device inventory)", file=sys.stderr)
+        return 0
 
     try:
         doc = fetch_model(client)

@@ -152,6 +152,13 @@ def fetch_mit(client: ApicClient, with_topology: bool = True) -> Dict[str, Any]:
     return {"totalCount": str(len(imdata)), "imdata": imdata}
 
 
+def probe_access(client: ApicClient) -> None:
+    """Confirm that the authenticated account can read the fabric inventory."""
+    response = client._request("/api/class/fabricNodeIdentP.json")
+    if not isinstance(response, dict) or not isinstance(response.get("imdata"), list):
+        raise RuntimeError("fabricNodeIdentP returned an unexpected response")
+
+
 def main(argv: Optional[list] = None) -> int:
     p = argparse.ArgumentParser(
         description="Pull an APIC policy model over the REST API (read-only).",
@@ -166,6 +173,9 @@ def main(argv: Optional[list] = None) -> int:
                    help="Enforce TLS cert verification (APICs use self-signed certs by default).")
     p.add_argument("--out", default="apic_export.json",
                    help="Output JSON path (default: apic_export.json).")
+    p.add_argument("--probe", action="store_true",
+                   help="Authenticate and perform one lightweight read-only API check, "
+                        "then exit without writing an export.")
     p.add_argument("--no-topology", action="store_true",
                    help="Fetch ONLY the config-only policy model (fabricNodeIdentP + "
                         "fvTenant). By default the tool also pulls operational + "
@@ -186,6 +196,15 @@ def main(argv: Optional[list] = None) -> int:
         print(f"[ERROR] APIC login failed: {exc}", file=sys.stderr)
         return 1
     print(f"[ok] authenticated to {args.host} as {args.user}", file=sys.stderr)
+
+    if args.probe:
+        try:
+            probe_access(client)
+        except (urllib.error.URLError, RuntimeError, KeyError, TypeError, ValueError) as exc:
+            print(f"[ERROR] APIC access probe failed: {exc}", file=sys.stderr)
+            return 1
+        print("[ok] access probe succeeded (fabricNodeIdentP)", file=sys.stderr)
+        return 0
 
     try:
         doc = fetch_mit(client, with_topology=not args.no_topology)

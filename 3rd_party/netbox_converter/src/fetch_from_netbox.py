@@ -171,6 +171,15 @@ def fetch_model(client: NetboxClient,
     return out
 
 
+def probe_access(client: NetboxClient, status: Any) -> None:
+    """Confirm status JSON and permission to read the core DCIM API."""
+    if not isinstance(status, dict):
+        raise RuntimeError("status API returned an unexpected response")
+    sites = client.get_object("dcim/sites/?limit=1")
+    if not isinstance(sites, dict) or not isinstance(sites.get("results"), list):
+        raise RuntimeError("sites API returned an unexpected response")
+
+
 def main(argv: Optional[list] = None) -> int:
     p = argparse.ArgumentParser(
         description="Pull a NetBox model over the read-only REST API (DCIM/IPAM core only).",
@@ -191,6 +200,9 @@ def main(argv: Optional[list] = None) -> int:
                    help="Disable TLS cert verification (for lab instances with self-signed certs).")
     p.add_argument("--out", default="netbox_export.json",
                    help="Output JSON path (default: netbox_export.json).")
+    p.add_argument("--probe", action="store_true",
+                   help="Authenticate and perform one lightweight read-only DCIM API check, "
+                        "then exit without writing an export.")
     args = p.parse_args(argv)
 
     token = args.token or os.environ.get("NETBOX_TOKEN")
@@ -218,6 +230,19 @@ def main(argv: Optional[list] = None) -> int:
     except (urllib.error.URLError, ValueError) as exc:
         print(f"[ERROR] cannot reach NetBox at {client.base}: {exc}", file=sys.stderr)
         return 1
+
+    if args.probe:
+        try:
+            probe_access(client, status)
+        except urllib.error.HTTPError as exc:
+            hint = " — check the API token and DCIM permissions" if exc.code in (401, 403) else ""
+            print(f"[ERROR] NetBox access probe failed: HTTP {exc.code}{hint}", file=sys.stderr)
+            return 1
+        except (urllib.error.URLError, RuntimeError, KeyError, TypeError, ValueError) as exc:
+            print(f"[ERROR] NetBox access probe failed: {exc}", file=sys.stderr)
+            return 1
+        print("[ok] access probe succeeded (sites)", file=sys.stderr)
+        return 0
 
     doc = fetch_model(client, site_filter=args.site)
 

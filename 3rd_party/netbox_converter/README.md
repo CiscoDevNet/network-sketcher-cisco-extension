@@ -152,6 +152,7 @@ following NetBox `next` pagination to completion. Read-only (GET only).
 | `--site` | Limit to a site slug (repeatable) |
 | `--page-size` | REST pagination page size (default 500) |
 | `--no-verify-tls` | Disable TLS verification (lab instances with self-signed certs) |
+| `--probe` | Check status and permission to read one sites page; do not write an export |
 | `--out` | Output JSON path |
 
 Collections fetched: `sites, locations, device-roles, platforms, manufacturers,
