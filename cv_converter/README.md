@@ -85,9 +85,10 @@ Routing Capability → Router) and the per-asset Purdue level.
 Noise groups (`Broadcast Components`, `Multicast`, `IPv6 Components`,
 `Packet Reply`, `To be investigated`) and non-routable IPs are excluded by
 default — toggle with `exclude_noise_groups` in the config. Assets whose
-Group cell is empty are kept and drawn together in an area named `Ungrouped`.
-Their Purdue zone still comes from the majority Device Type of that set, or
-from `group_zone_override` if the name `Ungrouped` is pinned there.
+Group cell is empty are kept. They are split by IPv4 /24 and each prefix
+becomes its own group, named like `dummy_(192.168.50.0/24)`. That name is
+classified like any other group: keyword match, then majority Device Type,
+or `group_zone_override` if the dummy name is pinned there.
 
 ## CPwE infrastructure synthesis
 

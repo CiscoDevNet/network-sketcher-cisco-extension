@@ -204,9 +204,6 @@ DEFAULT_NOISE_GROUPS = [
     "To be investigated", "Packet Replay",
 ]
 
-# Assets Cyber Vision has not placed in a group. They are drawn, not dropped.
-UNGROUPED_GROUP = "Ungrouped"
-
 
 # --------------------------------------------------------------------------- #
 # Config
@@ -241,7 +238,7 @@ def sanitize(name: str) -> str:
         return ""
     keep = []
     for ch in str(name).strip():
-        if ch.isalnum() or ch in " -_.+/":
+        if ch.isalnum() or ch in " -_.+/()":
             keep.append(ch)
     s = "".join(keep).strip()
     while "  " in s:
@@ -251,6 +248,15 @@ def sanitize(name: str) -> str:
 
 def norm(s: Optional[str]) -> str:
     return (s or "").strip()
+
+
+def dummy_group_name(ip: str) -> str:
+    """Label for an asset Cyber Vision left ungrouped: one group per IPv4 /24.
+
+    Example: 192.168.50.10 -> ``dummy_(192.168.50.0/24)``.
+    """
+    network = ipaddress.ip_network(f"{norm(ip)}/24", strict=False)
+    return f"dummy_({network})"
 
 
 def is_real_ip(ip: str) -> bool:
@@ -598,11 +604,11 @@ def convert(nodes_path: Optional[str], acts_path: Optional[str], out_dir: str, c
             continue
         live[key] = a
 
-    # A blank Group is an unclassified asset, not noise. Name it so the zone
-    # report and the area label stay readable. Named groups are unchanged.
+    # A blank Group is unclassified inventory, not noise. Split it by IPv4 /24
+    # and treat each prefix as its own group. Named groups are unchanged.
     for a in live.values():
         if not norm(a.group):
-            a.group = UNGROUPED_GROUP
+            a.group = dummy_group_name(a.ip)
 
     if not live:
         raise SystemExit("No in-scope assets found. Check input files / noise filters.")
