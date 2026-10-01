@@ -73,6 +73,16 @@ NODE_DEF_TABLE: Dict[str, tuple] = {
 }
 
 
+def model_is_external_connector(model: str) -> bool:
+    """True when the Attribute Model text names a CML External Connector.
+
+    Waypoint treatment is decided from this string, not from the CML
+    node_definition. ``External Connector (Bridge to host)`` matches;
+    a router whose label merely contains ``wan`` or ``cloud`` does not.
+    """
+    return "external connector" in (model or "").lower()
+
+
 # Keyword-based fallback rules; each item:
 #   (keyword_substring, NS_STENCIL, model_hint, os_hint, confidence)
 LABEL_KEYWORD_RULES = [
