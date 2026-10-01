@@ -83,8 +83,11 @@ Server, SCADA/Engineering/Windows → PC, Remote Access Gateway → Firewall,
 Routing Capability → Router) and the per-asset Purdue level.
 
 Noise groups (`Broadcast Components`, `Multicast`, `IPv6 Components`,
-`Packet Reply`, `To be investigated`, ungrouped) and non-routable IPs are
-excluded by default — toggle with `exclude_noise_groups` in the config.
+`Packet Reply`, `To be investigated`) and non-routable IPs are excluded by
+default — toggle with `exclude_noise_groups` in the config. Assets whose
+Group cell is empty are kept and drawn together in an area named `Ungrouped`.
+Their Purdue zone still comes from the majority Device Type of that set, or
+from `group_zone_override` if the name `Ungrouped` is pinned there.
 
 ## CPwE infrastructure synthesis
 

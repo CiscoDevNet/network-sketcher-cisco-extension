@@ -201,8 +201,11 @@ TAG_PRIORITY = [
 
 DEFAULT_NOISE_GROUPS = [
     "Broadcast Components", "IPv6 Components", "Packet Reply", "Multicast",
-    "To be investigated", "Packet Replay", "",
+    "To be investigated", "Packet Replay",
 ]
+
+# Assets Cyber Vision has not placed in a group. They are drawn, not dropped.
+UNGROUPED_GROUP = "Ungrouped"
 
 
 # --------------------------------------------------------------------------- #
@@ -594,6 +597,12 @@ def convert(nodes_path: Optional[str], acts_path: Optional[str], out_dir: str, c
             out_of_scope.append((a.name, a.ip, "no routable IPv4"))
             continue
         live[key] = a
+
+    # A blank Group is an unclassified asset, not noise. Name it so the zone
+    # report and the area label stay readable. Named groups are unchanged.
+    for a in live.values():
+        if not norm(a.group):
+            a.group = UNGROUPED_GROUP
 
     if not live:
         raise SystemExit("No in-scope assets found. Check input files / noise filters.")
