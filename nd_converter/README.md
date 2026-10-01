@@ -223,6 +223,9 @@ pulls the switch inventory, the observed links, and the VRF / Network overlay.
 Credentials come from a CLI arg or the `ND_PASSWORD` env var (never hard-coded);
 ND self-signed certs are accepted by default (`--verify-tls` to enforce).
 
+Use `--probe` to authenticate and read only the fabrics catalog, without
+collecting per-fabric details or writing an export.
+
 Each query is independent and a failed one is **skipped, not fatal** — a partial
 fetch still produces the best diagram the data allows.
 

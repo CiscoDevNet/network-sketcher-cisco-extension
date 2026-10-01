@@ -141,6 +141,16 @@ def _next_link(link_header: Optional[str]) -> Optional[str]:
     return None
 
 
+def probe_access(client: MerakiClient, org_id: str) -> None:
+    """Confirm that the API key can read the selected organization."""
+    response = client.get(f"/organizations/{org_id}")
+    if not isinstance(response, dict):
+        raise RuntimeError("organization API returned an unexpected response")
+    returned_id = str(response.get("id") or "")
+    if returned_id and returned_id != str(org_id):
+        raise RuntimeError("organization API returned a different organization")
+
+
 def fetch_org(client: MerakiClient, org_id: str,
               network_ids: Optional[List[str]] = None,
               include_clients: bool = False) -> Dict[str, Any]:
@@ -277,6 +287,9 @@ def main(argv: Optional[list] = None) -> int:
                    help="Disable TLS certificate verification (not normally needed).")
     p.add_argument("--out", default="meraki_export.json",
                    help="Output JSON path (default: meraki_export.json).")
+    p.add_argument("--probe", action="store_true",
+                   help="Perform one lightweight read-only organization API check, "
+                        "then exit without writing an export.")
     args = p.parse_args(argv)
 
     api_key = args.api_key or os.environ.get("MERAKI_API_KEY")
@@ -286,6 +299,16 @@ def main(argv: Optional[list] = None) -> int:
         return 2
 
     client = MerakiClient(api_key, verify_tls=not args.no_verify_tls)
+    if args.probe:
+        try:
+            probe_access(client, args.org_id)
+        except (urllib.error.URLError, RuntimeError, KeyError, TypeError, ValueError) as exc:
+            print(f"[ERROR] Meraki access probe failed: {exc}", file=sys.stderr)
+            return 1
+        print(f"[ok] access probe succeeded (organization {args.org_id})",
+              file=sys.stderr)
+        return 0
+
     print(f"[1/1] Fetching org {args.org_id} from {BASE} ...", file=sys.stderr)
     try:
         doc = fetch_org(client, args.org_id, network_ids=args.network_id,

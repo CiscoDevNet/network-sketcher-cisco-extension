@@ -318,6 +318,9 @@ it never modifies the SD-WAN fabric. Credentials come from a CLI arg or the
 typically self-signed lab certificate is accepted by default
 (`--verify-tls` to enforce verification).
 
+Use `--probe` to authenticate, obtain the CSRF token and read only the device
+inventory, without collecting per-device detail or writing an export.
+
 It pulls the device inventory, then per device (keyed by `system-ip`) its
 interface state, WAN transport-colour state, best-effort LLDP/CDP neighbor
 adjacency, and live BFD tunnel-session state; plus one fabric-wide pass for

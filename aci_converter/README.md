@@ -334,6 +334,9 @@ straight from a reachable APIC and writes a `convert`-ready JSON. Retrieval is
 the `ACI_PASSWORD` env var (never hard-coded); APIC self-signed certs are
 accepted by default (`--verify-tls` to enforce).
 
+Use `--probe` to authenticate and read only `fabricNodeIdentP`, without
+collecting the policy/topology model or writing an export.
+
 **By default** it pulls both the policy model (`fabricNodeIdentP` + every
 `fvTenant` subtree) **and** the operational + access-policy classes that make the
 diagrams reflect the real fabric:

@@ -116,6 +116,13 @@ def _paged(client: "CatcClient", base_path: str, grab) -> List[dict]:
     return out
 
 
+def probe_access(client: CatcClient) -> None:
+    """Confirm that the authenticated account can read Intent API sites."""
+    response = client.get("/dna/intent/api/v1/site")
+    if not isinstance(response, dict) or not isinstance(response.get("response"), list):
+        raise RuntimeError("site API returned an unexpected response")
+
+
 def fetch_model(client: CatcClient, with_endpoints: bool = False,
                 with_interfaces: bool = False) -> Dict[str, Any]:
     """Return a combined-JSON document ready for ``convert.py``.
@@ -230,6 +237,9 @@ def main(argv: Optional[list] = None) -> int:
                         "Gives real port speed/duplex/media in the underlay.")
     p.add_argument("--out", default="catc_export.json",
                    help="Output JSON path (default: catc_export.json).")
+    p.add_argument("--probe", action="store_true",
+                   help="Authenticate and perform one lightweight read-only API check, "
+                        "then exit without writing an export.")
     args = p.parse_args(argv)
 
     password = args.password or os.environ.get("CATC_PASSWORD")
@@ -245,6 +255,15 @@ def main(argv: Optional[list] = None) -> int:
         print(f"[ERROR] Catalyst Center login failed: {exc}", file=sys.stderr)
         return 1
     print(f"[ok] authenticated to {args.host} as {args.user}", file=sys.stderr)
+
+    if args.probe:
+        try:
+            probe_access(client)
+        except (urllib.error.URLError, RuntimeError, KeyError, TypeError, ValueError) as exc:
+            print(f"[ERROR] Catalyst Center access probe failed: {exc}", file=sys.stderr)
+            return 1
+        print("[ok] access probe succeeded (sites)", file=sys.stderr)
+        return 0
 
     try:
         doc = fetch_model(client, with_endpoints=args.with_endpoints,

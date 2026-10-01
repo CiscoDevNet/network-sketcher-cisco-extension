@@ -86,6 +86,7 @@ python -m meraki_converter.src.fetch_from_meraki \
     --org-id <ORG_ID> \
     --out    meraki_converter/Input_data/meraki_export.json
 #   options: --network-id <id> (repeatable), --include-clients, --api-key <key>
+#   connection check only: add --probe (no export is written)
 
 # 4. Convert the saved JSON (no live API needed)
 python -m meraki_converter.src.convert \
@@ -95,6 +96,8 @@ python -m meraki_converter.src.convert \
 ```
 
 `fetch_from_meraki` issues only GET requests — it never modifies the org.
+With `--probe`, it reads only the selected organization object to verify the
+API key and organization access.
 
 ### Getting a Meraki API key (read-only is sufficient)
 

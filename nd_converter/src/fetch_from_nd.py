@@ -98,6 +98,13 @@ def _epl_paths(name: str) -> List[str]:
     ]
 
 
+def probe_access(client: NdClient) -> None:
+    """Confirm that the authenticated account can read the fabric catalog."""
+    response = client.get(f"{_LAN}/control/fabrics")
+    if not isinstance(response, list):
+        raise RuntimeError("fabrics API returned an unexpected response")
+
+
 def fetch_model(client: NdClient, only_fabrics: Optional[List[str]] = None,
                 with_endpoints: bool = True, with_interfaces: bool = False,
                 with_vpc: bool = True) -> Dict[str, Any]:
@@ -219,6 +226,9 @@ def main(argv: Optional[list] = None) -> int:
                         "Gives real port speed/duplex/media in the underlay.")
     p.add_argument("--out", default="nd_export.json",
                    help="Output JSON path (default: nd_export.json).")
+    p.add_argument("--probe", action="store_true",
+                   help="Authenticate and perform one lightweight read-only API check, "
+                        "then exit without writing an export.")
     args = p.parse_args(argv)
 
     password = args.password or os.environ.get("ND_PASSWORD")
@@ -234,6 +244,15 @@ def main(argv: Optional[list] = None) -> int:
         print(f"[ERROR] Nexus Dashboard login failed: {exc}", file=sys.stderr)
         return 1
     print(f"[ok] authenticated to {args.host} as {args.user}", file=sys.stderr)
+
+    if args.probe:
+        try:
+            probe_access(client)
+        except (urllib.error.URLError, RuntimeError, KeyError, TypeError, ValueError) as exc:
+            print(f"[ERROR] Nexus Dashboard access probe failed: {exc}", file=sys.stderr)
+            return 1
+        print("[ok] access probe succeeded (fabrics)", file=sys.stderr)
+        return 0
 
     try:
         doc = fetch_model(client, only_fabrics=args.fabric,

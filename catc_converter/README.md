@@ -207,6 +207,9 @@ JSON. Retrieval is **read-only** — it never modifies the fabric. It authentica
 arg or the `CATC_PASSWORD` env var (never hard-coded); Catalyst Center
 self-signed certs are accepted by default (`--verify-tls` to enforce).
 
+Use `--probe` to authenticate and read only the sites endpoint, without
+collecting the model or writing an export.
+
 Network-device and interface collections are **paged** with
 `?offset=N&limit=500` (offset is 1-based; the fetcher loops until a page returns
 fewer than the limit). `fabricDevices` and `anycastGateways` REQUIRE a `fabricId`
