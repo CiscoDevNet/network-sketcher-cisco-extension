@@ -1,14 +1,14 @@
-# nd_converter — Cisco Nexus Dashboard (NDFC) to Network Sketcher Command Converter
+# nd_converter — Cisco Nexus Dashboard Fabric Controller to Network Sketcher Command Converter
 
-Convert a [Cisco Nexus Dashboard](https://www.cisco.com/site/us/en/products/networking/cloud-networking/nexus-dashboard/index.html)
-**Fabric Controller (NDFC)** NX-OS VXLAN EVPN fabric into ready-to-run
+Convert a [Cisco Nexus Dashboard Fabric Controller](https://www.cisco.com/site/us/en/products/networking/cloud-networking/nexus-dashboard/index.html)
+NX-OS VXLAN EVPN fabric into ready-to-run
 [Network Sketcher](https://github.com/cisco-open/network-sketcher) command
-scripts. The fabric model is pulled from Nexus Dashboard over its **read-only
+scripts. The fabric model is pulled from Nexus Dashboard Fabric Controller over its **read-only
 REST API** (`fetch_from_nd.py`) — or from a previously downloaded export — and
 converted **entirely offline** into two diagrams.
 
-> Validated end-to-end against a live **Nexus Dashboard 4.1.1** (NDFC / Fabric
-> Controller) and the Network Sketcher engine: both modes import cleanly and
+> Validated end-to-end against a live **Nexus Dashboard Fabric Controller 4.1.1**
+> and the Network Sketcher engine: both modes import cleanly and
 > every L1/L2/L3 diagram artifact generates correctly.
 
 <img alt="NDFC VXLAN EVPN fabric converted into underlay and overlay diagrams" src="https://github.com/user-attachments/assets/fa648322-e112-4bda-8508-9cbc42dd2870" />
@@ -44,7 +44,7 @@ do **not** line up 1:1, so this tool produces **two independent diagrams**
 | **Input** | NDFC model via the read-only REST API (`fetch_from_nd` → `nd_export.json`), **or** a previously saved combined JSON / directory of `*.json` / `.tar.gz` (auto-detected) |
 | **Output** | Two NS command scripts (`*_nd_underlay(L1Only).txt`, `*_nd_overlay.txt`) + a `[Flow_List]` CSV, debug models, and audit reports |
 | **Dependencies** | Python 3.10+ standard library only — no pip packages |
-| **ND connectivity** | `fetch_from_nd` uses the **read-only** REST API; `convert` is **fully offline** (local file I/O only) |
+| **NDFC connectivity** | `fetch_from_nd` uses the **read-only** REST API; `convert` is **fully offline** (local file I/O only) |
 
 ## Quick Start
 
@@ -52,13 +52,13 @@ do **not** line up 1:1, so this tool produces **two independent diagrams**
 # 1. No install needed (stdlib only)
 pip install -r requirements.txt          # no-op
 
-# 2. Fetch the model from Nexus Dashboard over the read-only REST API
+# 2. Fetch the model from Nexus Dashboard Fabric Controller over the read-only REST API
 #    (password via the ND_PASSWORD env var)
 ND_PASSWORD=... python -m nd_converter.src.fetch_from_nd \
     --host nd.example.com --user admin \
     --out nd_converter/Input_data/nd_export.json
 
-# 3. Convert offline into both diagrams (no ND connection)
+# 3. Convert offline into both diagrams (no NDFC connection)
 python -m nd_converter.src.convert \
     -i nd_converter/Input_data/nd_export.json \
     -m both \
@@ -67,7 +67,7 @@ python -m nd_converter.src.convert \
 ```
 
 Steps 2 and 3 are **independent**: fetch once, convert as many times as you like
-(different `--mode` / config) with no further ND access.
+(different `--mode` / config) with no further NDFC access.
 
 ## Modes (`--mode`, default `both`)
 
@@ -157,7 +157,7 @@ membership, not cabling) and their Speed/Duplex/Port-Type are `Unknown`.
 >   port, so extras are dropped (fabric ISLs win over neighbour-only links).
 >   Every dropped/inferred element is listed under `INFERRED` in the report.
 >
-> **Always validate against Nexus Dashboard before relying on the diagram.**
+> **Always validate against Nexus Dashboard Fabric Controller before relying on the diagram.**
 
 ## Device color conventions
 
@@ -170,8 +170,8 @@ is **shared across every converter in this repo**:
 | Colour | RGB | Meaning | Used in nd_converter |
 |--------|-----|---------|----------------------|
 | 🟩 Light green | `[235, 241, 222]` | **Observed network gear** — real router / L3 switch / switch / firewall / WLC / AP | ✅ underlay: leaf / spine / border / BGW switches |
-| 🟥 Light red | `[255, 204, 204]` | **Server-role endpoint** — server / controller / internet service | base palette (nd recolours overlay hosts purple — see below) |
-| 🟨 Light yellow | `[255, 255, 204]` | **Client endpoint** — PC / workstation / phone | base palette (nd recolours overlay devices purple — see below) |
+| 🟥 Light red | `[255, 204, 204]` | **Server-role endpoint** — server / controller / internet service | base palette (NDFC recolours overlay hosts purple — see below) |
+| 🟨 Light yellow | `[255, 255, 204]` | **Client endpoint** — PC / workstation / phone | base palette (NDFC recolours overlay devices purple — see below) |
 | 🟪 Light purple | `[221, 204, 255]` | **Logical / overlay** — every VRF gateway, Network and endpoint host | ✅ overlay: all logical devices |
 | 🟦 Light blue | `[220, 230, 242]` | **Observed WayPoint** — a WayPoint backed by a real source record. Also the fixed colour of the **Stencil Type** attribute column | ✅ underlay: external neighbour waypoints (ISN / edge / core — real switches, just outside the fabric inventory) — and (as the Stencil-Type column cell on every device) |
 | ⬜ Light gray | `[200, 200, 200]` | **Inferred / synthesised** — placeholders that do not exist in the source | not currently emitted — nd_converter has no purely-synthesised device today |
@@ -191,7 +191,7 @@ the `Server` stencil type.
 
 ## Accuracy caveats
 
-- **Underlay accuracy depends on what Nexus Dashboard returns.** Switch
+- **Underlay accuracy depends on what Nexus Dashboard Fabric Controller returns.** Switch
   role/model/NX-OS version/mgmt-IP/serial and the `control/links` cabling are
   all **observed** from the live fabric — nothing is inferred here (unlike
   `aci_converter`, which must infer ACI's CLOS mesh from a config-only
@@ -205,7 +205,7 @@ the `Server` stencil type.
   1 Network = 1 VLAN design — see "Concepts that can NOT be fully
   represented" above).
 - **Endpoint Locator hosts are optional.** Not every fabric has EPL enabled,
-  so hosts may not appear under every Network — see "Readable Nexus Dashboard
+  so hosts may not appear under every Network — see "Readable Nexus Dashboard Fabric Controller
   data sources" below for what each source contributes.
 - **Underlay link de-duplication can drop real adjacencies.** NDFC neighbour
   discovery can report several adjacencies on one physical port; NS allows
@@ -216,12 +216,12 @@ the `Server` stencil type.
 ## `fetch_from_nd.py` — pulling the model over the REST API
 
 The converter reads local files, but `fetch_from_nd.py` grabs the model straight
-from a reachable Nexus Dashboard and writes a `convert`-ready combined JSON.
+from a reachable Nexus Dashboard Fabric Controller and writes a `convert`-ready combined JSON.
 Retrieval is **read-only** — it never modifies the fabric. It logs in
 (`POST /login` → JWT), then for every fabric (or those named with `--fabric`)
 pulls the switch inventory, the observed links, and the VRF / Network overlay.
 Credentials come from a CLI arg or the `ND_PASSWORD` env var (never hard-coded);
-ND self-signed certs are accepted by default (`--verify-tls` to enforce).
+NDFC self-signed certs are accepted by default (`--verify-tls` to enforce).
 
 Use `--probe` to authenticate and read only the fabrics catalog, without
 collecting per-fabric details or writing an export.
@@ -250,9 +250,9 @@ interface detail is opt-in with `--with-interfaces` (one call per switch).
 (filenames hint the collection + fabric, e.g. `switches_<fabric>.json`) or a
 `.tar.gz` of either.
 
-## Readable Nexus Dashboard data sources
+## Readable Nexus Dashboard Fabric Controller data sources
 
-Nexus Dashboard exposes far more than the core fabric model. The converter
+Nexus Dashboard Fabric Controller exposes far more than the core fabric model. The converter
 consumes the **core** sources always and the **optional richer** sources
 whenever they are present in the export — a fabric that has them gets a richer
 diagram, and one that does not is unaffected (every optional source degrades to

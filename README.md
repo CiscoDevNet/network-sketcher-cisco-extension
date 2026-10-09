@@ -58,7 +58,7 @@ issues. Tools are listed alphabetically.
 | Config files (IOS / IOS-XE / NX-OS / IOS-XR / ASA) | [`config_converter`](./config_converter/) | Reconstruct L1/L2/L3 from `show running-config` text files (subnet-based topology inference; no live device connection). | Running-config text files (local directory) | ✅ Available |
 | Cyber Vision | [`cv_converter`](./cv_converter/) | Build an OT topology (Purdue / IEC 62443 / CPwE zones) from Cyber Vision asset + activity exports. | Cisco Cyber Vision networkNodes + activities CSV (local files) | ✅ Available |
 | Meraki | [`meraki_converter`](./meraki_converter/) | Convert a Meraki organization into a Network Sketcher command script reconstructing L1/L2/L3. | Meraki org via read-only Dashboard API v1 (`fetch_from_meraki`) → JSON | ✅ Available |
-| Nexus Dashboard | [`nd_converter`](./nd_converter/) | Convert an NDFC VXLAN EVPN fabric into two diagrams: the physical **underlay** (leaf/spine/border) and the logical **overlay** (VRF / Network / anycast gateway). | NDFC model via read-only REST API (`fetch_from_nd`) → JSON | ✅ Available |
+| Nexus Dashboard Fabric Controller | [`nd_converter`](./nd_converter/) | Convert an NDFC VXLAN EVPN fabric into two diagrams: the physical **underlay** (leaf/spine/border) and the logical **overlay** (VRF / Network / anycast gateway). | NDFC model via read-only REST API (`fetch_from_nd`) → JSON | ✅ Available |
 | Secure Network Analytics | [`sna_converter`](./sna_converter/) | Reconstruct a multi-site L1/L2/L3 topology + endpoints from observed NetFlow. | Cisco SNA (Secure Network Analytics) Flow Search CSV (local file) | ✅ Available |
 
 > Every tool produces Network Sketcher CLI commands, so the
@@ -136,7 +136,7 @@ network-sketcher-cisco-extension/
 ├── config_converter/    ← running-config text → L1/L2/L3 (inferred)
 ├── cv_converter/        ← Cyber Vision CSV → OT (Purdue / IEC 62443)
 ├── meraki_converter/    ← Meraki org (Dashboard API) → L1/L2/L3
-├── nd_converter/        ← Nexus Dashboard / NDFC (REST API) → underlay + overlay
+├── nd_converter/        ← NDFC (REST API) → underlay + overlay
 ├── sdwan_converter/     ← Catalyst SD-WAN / vManage (REST API) → transport underlay + Service VPN overlay
 ├── sna_converter/       ← SNA / NetFlow CSV → commands + [FLOW] matrix
 ├── template_converter/  ← scaffold for building new converters (contributor tooling)
@@ -178,8 +178,8 @@ the others.
   — the OT/ICS visibility platform whose asset + activity exports feed `cv_converter`.
 - [Cisco Meraki](https://meraki.cisco.com/) — the cloud-managed networking
   platform whose read-only Dashboard API v1 feeds `meraki_converter`.
-- [Cisco Nexus Dashboard](https://www.cisco.com/site/us/en/products/networking/cloud-networking/nexus-dashboard/index.html)
-  — the NDFC / Fabric Controller platform whose read-only REST API feeds
+- [Cisco Nexus Dashboard Fabric Controller](https://www.cisco.com/site/us/en/products/networking/cloud-networking/nexus-dashboard/index.html)
+  — the NDFC platform whose read-only REST API feeds
   `nd_converter`.
 - [Cisco Catalyst SD-WAN](https://www.cisco.com/site/us/en/products/networking/sd-wan/index.html)
   — the vManage-managed SD-WAN fabric platform whose read-only REST API feeds
