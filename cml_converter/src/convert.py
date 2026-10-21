@@ -23,8 +23,9 @@ absolute path):
 - ``stencil_mapping.csv``   – stencil type mapping table (audit)
 - ``parse_report.md``       – per-device config coverage statistics
 
-The tool deliberately has **no** dependency on the CML REST API.  All input
-comes from local files only.
+``fetch_from_cml.py`` can pull labs over the read-only REST API into a local
+JSON file. Conversion itself still reads only that file. A multi-lab JSON
+file places each lab in its own area.
 """
 from __future__ import annotations
 
@@ -33,7 +34,8 @@ import csv
 import json
 import pathlib
 import sys
-from typing import Any, Dict, Optional
+from collections import defaultdict
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 import yaml
 
@@ -43,7 +45,7 @@ import yaml
 # ---------------------------------------------------------------------------
 from .stencil_mapper import map_all, to_csv_rows
 from .config_parser import parse_all
-from .topology_mapper import build_ns_model, model_to_dict
+from .topology_mapper import _pick_area, build_ns_model, model_to_dict
 from .ns_command_builder import build_command_script
 
 
@@ -120,6 +122,110 @@ def _extract_topology(data: Any) -> tuple[list, list]:
     return candidates[0]
 
 
+def sanitize_lab_area(title: str) -> str:
+    """Make a lab title safe as a Network Sketcher area name.
+
+    Slashes break diagram file names, and a single quote breaks the NS
+    command quoting. Spaces are kept (``CSR 1000v Feature Tests``).
+    """
+    cleaned = "".join("_" if ch in "/\\'" else ch for ch in (title or "").strip())
+    cleaned = cleaned.strip()
+    return cleaned or "lab"
+
+
+def merge_labs(labs: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """Flatten a fetch_from_cml document into one node list and one link list.
+
+    Every node is stamped with ``_ns_area`` = the sanitized lab title, so
+    ``_pick_area()`` keeps one lab in one area. Device labels that Network
+    Sketcher would treat as the same name are then made unique.
+    """
+    prepared: List[Tuple[str, List[Dict[str, Any]], List[Dict[str, Any]]]] = []
+    used_areas: Dict[str, int] = {}
+    for lab in labs:
+        if not isinstance(lab, dict):
+            continue
+        raw_title = str(lab.get("lab_title") or lab.get("id") or "lab")
+        area = sanitize_lab_area(raw_title)
+        if area in used_areas:
+            used_areas[area] += 1
+            area = f"{area}_{used_areas[area]}"
+        else:
+            used_areas[area] = 1
+        nodes = [n for n in (lab.get("nodes") or []) if isinstance(n, dict)]
+        links = [lk for lk in (lab.get("links") or []) if isinstance(lk, dict)]
+        prepared.append((area, nodes, links))
+
+    all_nodes: List[Dict[str, Any]] = []
+    all_links: List[Dict[str, Any]] = []
+    for area, nodes, links in prepared:
+        for node in nodes:
+            node["_ns_area"] = area
+            all_nodes.append(node)
+        all_links.extend(links)
+    disambiguate_device_labels(all_nodes)
+    return all_nodes, all_links
+
+
+def disambiguate_device_labels(nodes: List[Dict[str, Any]]) -> None:
+    """Rename device labels that Network Sketcher cannot tell apart.
+
+    NS compares device names without regard to case, so ``External`` and
+    ``external`` are one device, as are the same label in two labs. Each
+    colliding node is prefixed with its area. When that prefix is still the
+    same once case is ignored, ``_2``, ``_3``, … is appended. Links are
+    untouched because they cite node ids. The previous label is stored in
+    ``_ns_original_label`` so a ``--configs`` file can follow the rename.
+    A label that is already unique is left unchanged.
+    """
+    groups: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+    for node in nodes:
+        label = str(node.get("label") or "")
+        if label:
+            groups[label.casefold()].append(node)
+
+    used: Set[str] = set()
+    for key, members in groups.items():
+        if len(members) == 1:
+            used.add(key)
+
+    def area_of(node: Dict[str, Any]) -> str:
+        stamped = node.get("_ns_area")
+        if isinstance(stamped, str) and stamped.strip():
+            return stamped.strip()
+        return _pick_area(node)
+
+    def claim(base: str) -> str:
+        candidate = base
+        suffix = 2
+        while candidate.casefold() in used:
+            candidate = f"{base}_{suffix}"
+            suffix += 1
+        used.add(candidate.casefold())
+        return candidate
+
+    for members in groups.values():
+        if len(members) <= 1:
+            continue
+        for node in members:
+            label = str(node.get("label") or "")
+            area = area_of(node)
+            renamed = claim(f"{area}_{label}" if area else label)
+            if renamed != label:
+                node["_ns_original_label"] = label
+                node["label"] = renamed
+
+
+def _extract_labs(data: Any) -> Optional[Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]]:
+    """Return merged nodes/links when ``data`` is a multi-lab fetch document."""
+    if not isinstance(data, dict):
+        return None
+    labs = data.get("labs")
+    if not isinstance(labs, list):
+        return None
+    return merge_labs(labs)
+
+
 # ---------------------------------------------------------------------------
 # Running-config loader
 # ---------------------------------------------------------------------------
@@ -177,6 +283,21 @@ def _extract_configs_from_nodes(nodes: list) -> Dict[str, str]:
     return configs
 
 
+def _rekey_configs(configs: Dict[str, str], nodes: list) -> Dict[str, str]:
+    """Point config text at the label a renamed device now uses."""
+    rekeyed: Dict[str, str] = {}
+    for node in nodes:
+        label = str(node.get("label") or "").strip()
+        if not label:
+            continue
+        original = str(node.get("_ns_original_label") or label).strip()
+        if original in configs:
+            rekeyed[label] = configs[original]
+        elif label in configs:
+            rekeyed[label] = configs[label]
+    return rekeyed
+
+
 def _load_running_configs(configs_dir: Optional[pathlib.Path]) -> Dict[str, str]:
     """Load ``*.txt`` / ``*.cfg`` / ``*.conf`` files from a directory.
 
@@ -208,6 +329,7 @@ def _write_parse_report(
     stats: Dict[str, Dict[str, int]],
     nodes: list,
     parsed_configs: Dict[str, Any],
+    skipped_ports: Optional[List[Tuple[str, str, str]]] = None,
 ) -> None:
     node_labels = {str(n.get("label", "")) for n in nodes}
     covered = set(parsed_configs.keys()) & node_labels
@@ -235,6 +357,15 @@ def _write_parse_report(
             f"| {st.get('portchannel', '-')} "
             f"| {st.get('vrf', '-')} |"
         )
+    if skipped_ports:
+        lines += [
+            "",
+            "## Skipped ports (no L1 link in the CML lab)\n",
+            "| Device | Port | Not emitted |",
+            "|--------|------|-------------|",
+        ]
+        for device, port, what in skipped_ports:
+            lines.append(f"| {device} | {port} | {what} |")
     report_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     print(f"  parse_report.md  → {report_path}")
 
@@ -253,7 +384,7 @@ def main(argv: Optional[list] = None) -> int:
         "--yaml", "-y",
         required=True,
         metavar="CML_TOPOLOGY.yaml",
-        help="Path to CML Lab YAML (UI export or API dump).",
+        help="Path to a CML Lab YAML, or the JSON written by fetch_from_cml.",
     )
     parser.add_argument(
         "--configs", "-c",
@@ -300,8 +431,15 @@ def main(argv: Optional[list] = None) -> int:
         print(f"[ERROR] YAML parse error: {exc}", file=sys.stderr)
         return 1
 
-    nodes, links = _extract_topology(raw_data)
-    print(f"         nodes={len(nodes)}, links={len(links)}")
+    merged = _extract_labs(raw_data)
+    if merged is not None:
+        nodes, links = merged
+        print(f"         labs={len(raw_data.get('labs') or [])}, "
+              f"nodes={len(nodes)}, links={len(links)}")
+    else:
+        nodes, links = _extract_topology(raw_data)
+        disambiguate_device_labels(nodes)
+        print(f"         nodes={len(nodes)}, links={len(links)}")
 
     # ------------------------------------------------------------------
     # Step 2: stencil mapping
@@ -326,7 +464,7 @@ def main(argv: Optional[list] = None) -> int:
     # ------------------------------------------------------------------
     print("[3/6] Loading running configs …")
     if configs_dir:
-        raw_configs = _load_running_configs(configs_dir)
+        raw_configs = _rekey_configs(_load_running_configs(configs_dir), nodes)
         print(f"         source: --configs directory ({len(raw_configs)} file(s))")
     else:
         raw_configs = _extract_configs_from_nodes(nodes)
@@ -349,6 +487,9 @@ def main(argv: Optional[list] = None) -> int:
         encoding="utf-8",
     )
     print(f"  ns_model.json    → {model_path}")
+    if model.skipped_ports:
+        print(f"  [WARN] {len(model.skipped_ports)} L2/L3 item(s) skipped on ports with "
+              f"no L1 link. See parse_report.md.")
 
     # ------------------------------------------------------------------
     # Step 5: generate NS commands
@@ -364,7 +505,7 @@ def main(argv: Optional[list] = None) -> int:
     # Step 6: parse report
     # ------------------------------------------------------------------
     print("[6/6] Writing parse report …")
-    _write_parse_report(out_dir, parse_stats, nodes, parsed_configs)
+    _write_parse_report(out_dir, parse_stats, nodes, parsed_configs, model.skipped_ports)
 
     print("\n[Done] All outputs written.")
     return 0

@@ -3,7 +3,8 @@
 Convert a [Cisco Modeling Labs (CML)](https://developer.cisco.com/modeling-labs/)
 topology YAML file into a ready-to-run
 [Network Sketcher](https://github.com/cisco-open/network-sketcher) command
-script — no CML server required.
+script. Conversion reads a local file. An optional fetch step can pull
+labs from a CML controller first.
 
 > The Network Sketcher Offline edition has a built-in CML import, but it covers
 > **Layer 1 only** (devices and physical links). `cml_converter` is the
@@ -30,10 +31,10 @@ script — no CML server required.
 
 | Item | Detail |
 |------|--------|
-| **Input** | CML Lab YAML (UI export or API dump) + optional running-config files |
+| **Input** | CML Lab YAML, or the multi-lab JSON from `fetch_from_cml`, plus optional running-config files |
 | **Output** | `ns_commands.txt` ready for Network Sketcher `run_commands`, plus debug/audit artefacts |
-| **Dependencies** | Python 3.10+, PyYAML — running-config parsing itself is stdlib-only |
-| **CML connectivity** | None — purely local file I/O |
+| **Dependencies** | Python 3.10+, PyYAML — fetch and running-config parsing are stdlib-only |
+| **CML connectivity** | Optional. `fetch_from_cml` is a read-only REST client; `convert` reads the saved file |
 | **Release** | Ver 0.5.1b |
 
 ## Quick Start
@@ -55,7 +56,56 @@ python -m cml_converter.src.convert \
     --yaml    my_lab.yaml \
     --configs running_configs/ \
     --out     output/ns_commands.txt
+
+# 5. Optional: pull every lab from a CML controller, then convert.
+#    An administrator account also includes labs owned by other users.
+#    Password from --password or the CML_PASSWORD environment variable.
+#    TLS verification is off by default; pass --verify-tls to enforce it.
+python -m cml_converter.src.fetch_from_cml \
+    --host cml.example.com --user administrator \
+    --out  cml_export.json
+python -m cml_converter.src.convert \
+    --yaml cml_export.json \
+    --out  output/ns_commands.txt
 ```
+
+## Fetching labs from CML
+
+`fetch_from_cml` authenticates with `POST /api/v0/authenticate` and downloads
+each lab with `GET /api/v0/labs/{id}` and `GET /api/v0/labs/{id}/topology`.
+It never starts, stops, or edits a lab. The password is not written to the
+export or to the log.
+
+The lab list is `GET /api/v0/labs?show_all=true`. CML's plain `GET /api/v0/labs`
+returns only labs owned by the logged-in user, so a lab created by another
+account (including another administrator) would be missing. With `show_all`,
+an administrator account receives every lab on the controller. A non-admin
+account still receives only its own labs; that limit is enforced by CML.
+
+```bash
+# Confirm credentials with one lightweight GET, and write nothing
+python -m cml_converter.src.fetch_from_cml \
+    --host cml.example.com --probe
+
+# One lab, by title or by id (repeat --lab to select several)
+python -m cml_converter.src.fetch_from_cml \
+    --host cml.example.com --lab "CSR 1000v Feature Tests" \
+    --out cml_export.json
+```
+
+The JSON is `{"labs":[{"lab_title","nodes","links"}, ...]}`. `convert` keeps
+**one lab in one area**. The area name is the lab title; `/`, `\`, and `'`
+become `_`, and spaces stay. Tags and label heuristics that split a single
+YAML export (for example `site1`) are not applied to a fetched lab. An
+External Connector is still placed in `<lab>-ext` and drawn as a waypoint.
+A device label that Network Sketcher would treat as the same name is
+prefixed with its area. That includes the same spelling in two labs and
+names that differ only by case inside one lab (`External` and `external`).
+If the prefixed names still match once case is ignored, `_2`, `_3`, … is
+appended. Links follow the rename because they cite node ids, and embedded
+configs are read under the new label. A YAML file that is not this multi-lab
+JSON keeps the previous area rules, and the same case-insensitive rename
+applies there too.
 
 ## Output files
 
@@ -111,6 +161,7 @@ running_configs/
 - CML UI export (`Lab → Export → YAML`) — `lab: {nodes: [...], links: [...]}`
 - CML REST API dump (`GET /api/v0/labs/{id}/topology`) — flat `nodes`/`links`
 - Single-file combined topology dumps with top-level `topology:` key
+- Multi-lab JSON from `fetch_from_cml` (`labs: [{lab_title, nodes, links}]`) — one lab, one area
 
 ## Directory structure
 
@@ -119,10 +170,33 @@ cml_converter/
 ├── README.md            (this file)
 ├── requirements.txt
 ├── .gitignore
-└── src/                 (entry point: convert.py)
+└── src/                 (convert.py, fetch_from_cml.py)
 ```
 
 ## Changelog
+
+### API fetch
+
+- **CML REST fetch**: `fetch_from_cml.py` downloads lab topologies (read-only).
+  Password via `--password` or `CML_PASSWORD`. `--probe` checks access and
+  writes no file. The list call is `GET /api/v0/labs?show_all=true`, so an
+  administrator account also includes labs owned by other users. Converting
+  that JSON places each lab in its own area. Device names that match once
+  case is ignored, such as `External` and `external`, are renamed so each
+  device, its links, and its config stay distinct.
+- **Port names**: the Catalyst SD-WAN Validator / vEdge form `ge0/0` becomes
+  `GigabitEthernet 0/0`. An unknown type token is still split at the first
+  digit (`<type> <number>`), because one port name without a space fails the
+  whole `add l1_link_bulk`.
+- **Waypoint area placement**: NS refuses an `add area_location` row that puts
+  two waypoint-only (`*_wp_`) areas side by side, and that one rejection took
+  the whole Phase 1 batch with it, leaving no areas for any later phase. A
+  waypoint area now waits for the next ordinary area, or moves to its own row.
+- **Unlinked ports**: NS only creates a physical port when an L1 link uses it.
+  An IP, VRF, L2 segment, port-channel member, or sub-interface on a port
+  with no link in the CML lab is no longer emitted (it stopped the script
+  with "L3 interface not found"). Each one is listed under "Skipped ports"
+  in `parse_report.md`.
 
 ### Ver 0.5.1b (2026-09-03)
 

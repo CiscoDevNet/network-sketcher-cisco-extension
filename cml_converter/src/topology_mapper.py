@@ -145,6 +145,8 @@ class NSModel:
     port_channels: List[NSPortChannel] = field(default_factory=list)
     subinterfaces: List[NSSubInterface] = field(default_factory=list)  # dot1q sub-ifs (RULE: vport_l1if_direct_binding)
     vrf_renames: List[Tuple[str, str, str]] = field(default_factory=list)  # (device, port, vrf)
+    # (device, port, what) dropped because NS never creates that port.
+    skipped_ports: List[Tuple[str, str, str]] = field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -176,6 +178,8 @@ _IFACE_TYPE_PATTERNS = [
     (re.compile(r"^GigE", re.IGNORECASE), "GigabitEthernet"),
     (re.compile(r"^Gig(?=\d)", re.IGNORECASE), "GigabitEthernet"),
     (re.compile(r"^Gi(?=\d)", re.IGNORECASE), "GigabitEthernet"),
+    # Catalyst SD-WAN Validator / vEdge data ports: 'ge0/0'.
+    (re.compile(r"^ge(?=\d)", re.IGNORECASE), "GigabitEthernet"),
     (re.compile(r"^FastEthernet", re.IGNORECASE), "FastEthernet"),
     (re.compile(r"^Fas(?=\d)", re.IGNORECASE), "FastEthernet"),
     (re.compile(r"^Fa(?=\d)", re.IGNORECASE), "FastEthernet"),
@@ -294,7 +298,12 @@ def normalise_port_name(raw: str) -> str:
                 remainder = _numericise_path_segments(remainder)
             return f"{canonical} {remainder}" if remainder else canonical
 
-    return raw  # unknown form: leave as-is (NS may still reject it)
+    # Unknown type token: NS still requires "<type> <number>", so split at the
+    # first digit rather than emit a name that fails the whole bulk command.
+    m = re.match(r"^([A-Za-z][A-Za-z_-]*?)[\s_-]*(\d.*)$", raw)
+    if m:
+        return f"{m.group(1)} {m.group(2)}"
+    return raw
 
 
 # ---------------------------------------------------------------------------
@@ -370,7 +379,15 @@ _OBSERVED_WAYPOINT = (220, 230, 242)
 
 
 def _pick_area(node: Dict[str, Any]) -> str:
-    """Choose an area name from a CML node's tags / label."""
+    """Choose an area name from a CML node's tags / label.
+
+    A node stamped with ``_ns_area`` (set when several API labs are merged)
+    stays in that lab. Tag and label heuristics are not applied, so one lab
+    remains one area.
+    """
+    stamped = node.get("_ns_area")
+    if isinstance(stamped, str) and stamped.strip():
+        return stamped.strip()
     tags = [str(t).lower() for t in (node.get("tags") or [])]
     for t in tags:
         if SITE_TAG_RE.match(t):
@@ -541,6 +558,33 @@ def _coalesce_directly_linked_areas(
     return reassigned
 
 
+def arrange_area_rows(ordered_areas: List[str]) -> List[List[str]]:
+    """Lay areas out so no two waypoint areas sit side by side.
+
+    The NS engine refuses an ``add area_location`` row that places two
+    waypoint-only (``*_wp_``) areas horizontally adjacent, and that one
+    rejection takes the whole Phase 1 batch with it — no areas, so every
+    later phase has nowhere to put its devices. A waypoint that cannot
+    follow the previous one waits for the next ordinary area, and anything
+    still waiting at the end goes on its own row.
+    """
+    def is_wp(area: str) -> bool:
+        return area.endswith("_wp_")
+
+    rows: List[List[str]] = [[]]
+    waiting: List[str] = []
+    for area in ordered_areas:
+        row = rows[-1]
+        if is_wp(area) and row and is_wp(row[-1]):
+            waiting.append(area)
+            continue
+        row.append(area)
+        if waiting and not is_wp(row[-1]):
+            row.append(waiting.pop(0))
+    rows.extend([area] for area in waiting)
+    return [row for row in rows if row]
+
+
 def build_area_layout(
     devices: Dict[str, NSDevice],
     l1_links: Optional[List[NSL1Link]] = None,
@@ -549,7 +593,8 @@ def build_area_layout(
     """Return (area_layout, area_to_device_grid).
 
     Strategy:
-      - Areas are placed left-to-right in row 0 (one outer row is enough for POC).
+      - Areas are placed left-to-right, moving a waypoint area along the row
+        (or onto its own row) so two of them are never adjacent.
       - Within an area, device placement depends on ``layout``:
           * ``coordinate`` / ``auto`` — mirror the CML canvas (x, y) positions
             via ``_place_by_coordinates``; ``auto`` (and ``coordinate``) fall
@@ -612,7 +657,7 @@ def build_area_layout(
             grid = _place_columns(tier_rows, adjacency)
         area_to_grid[rendered] = grid
 
-    area_layout = [rendered_areas]
+    area_layout = arrange_area_rows(rendered_areas)
     return area_layout, area_to_grid
 
 
@@ -1100,6 +1145,66 @@ def apply_parsed_configs(
     return stats
 
 
+def prune_unlinked_ports(model: NSModel) -> None:
+    """Drop L2/L3 entries on ports that no command ever creates.
+
+    NS only registers a physical port when an L1 link uses it. A config line
+    such as an IP on an unconnected ``GigabitEthernet0/2`` therefore fails
+    ``add ip_address_bulk`` with "L3 interface not found", and the rest of
+    the script never runs. Each dropped entry is kept in
+    ``model.skipped_ports`` for the parse report.
+    """
+    physical: Set[Tuple[str, str]] = set()
+    for lk in model.l1_links:
+        physical.add((lk.a_device, lk.a_port))
+        physical.add((lk.b_device, lk.b_port))
+
+    skipped: List[Tuple[str, str, str]] = []
+
+    kept_pcs: List[NSPortChannel] = []
+    for pc in model.port_channels:
+        members = [p for p in pc.physical_ports if (pc.device, p) in physical]
+        for p in pc.physical_ports:
+            if (pc.device, p) not in physical:
+                skipped.append((pc.device, p, f"{pc.portchannel_name} member"))
+        if members:
+            pc.physical_ports = members
+            kept_pcs.append(pc)
+        else:
+            skipped.append((pc.device, pc.portchannel_name, "port-channel"))
+    model.port_channels = kept_pcs
+
+    kept_subs: List[NSSubInterface] = []
+    for si in model.subinterfaces:
+        if (si.device, si.parent_port) in physical:
+            kept_subs.append(si)
+        else:
+            skipped.append((si.device, si.subif_port, "sub-interface"))
+    model.subinterfaces = kept_subs
+
+    existing: Set[Tuple[str, str]] = set(physical)
+    existing.update((v.device, v.port) for v in model.virtual_ports)
+    existing.update((pc.device, pc.portchannel_name) for pc in model.port_channels)
+    existing.update((si.device, si.subif_port) for si in model.subinterfaces)
+
+    def keep(device: str, port: str, what: str) -> bool:
+        if (device, port) in existing:
+            return True
+        skipped.append((device, port, what))
+        return False
+
+    model.ip_assignments = [
+        ip for ip in model.ip_assignments if keep(ip.device, ip.port, "ip address")
+    ]
+    model.l2_segments_phys = [
+        s for s in model.l2_segments_phys if keep(s.device, s.port, "l2 segment")
+    ]
+    model.vrf_renames = [
+        r for r in model.vrf_renames if keep(r[0], r[1], f"vrf {r[2]}")
+    ]
+    model.skipped_ports = skipped
+
+
 def _extract_vlan_id(iface_name: str) -> Optional[int]:
     m = re.search(r"(\d+)$", iface_name)
     return int(m.group(1)) if m else None
@@ -1149,6 +1254,7 @@ def build_ns_model(
         model, parsed_configs,
         cml_node_labels={str(n.get("label", "")) for n in nodes},
     )
+    prune_unlinked_ports(model)
     return model, parse_stats
 
 
@@ -1206,5 +1312,9 @@ def model_to_dict(model: NSModel) -> Dict[str, Any]:
         "vrf_renames": [
             {"device": d, "port": p, "vrf": v}
             for (d, p, v) in model.vrf_renames
+        ],
+        "skipped_ports": [
+            {"device": d, "port": p, "what": w}
+            for (d, p, w) in model.skipped_ports
         ],
     }
