@@ -1,0 +1,36 @@
+# Generated output (kept out of version control)
+Output_data/*
+!Output_data/.gitkeep
+
+# FMC exports are site-specific. This converter ships no sample export.
+Input_data/*
+!Input_data/.gitkeep
+
+# Generated artifacts if ever written next to the script
+ns_commands*.txt
+ns_model_*.json
+gen_*.csv
+fmc_inventory.csv
+fmc_report.md
+fmc_export.json
+\[MASTER\]*.nsm
+\[L1_DIAGRAM\]*
+\[L2_DIAGRAM\]*
+\[L3_DIAGRAM\]*
+\[L1L2L3_DIAGRAM\]*
+\[DEVICE_TABLE\]*
+\[AI_Context\]*
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.env
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

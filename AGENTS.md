@@ -6,8 +6,8 @@ this repository.
 **What this project is:** `network-sketcher-cisco-extension` is a monorepo of standalone Python CLIs
 that turn Cisco platform data into [Network Sketcher](https://github.com/cisco-open/network-sketcher)
 CLI command scripts, so an L1/L2/L3 topology can be rebuilt automatically. Each tool lives in its own
-sub-directory (`aci_converter/`, `cml_converter/`, `config_converter/`, `cv_converter/`,
-`sdwan_converter/`, `sna_converter/`, …) with its own
+sub-directory (`aci_converter`, `catc_converter`, `cml_converter`, `config_converter`, `cv_converter`,
+`fmc_converter`, `meraki_converter`, `nd_converter`, `sdwan_converter`, `sna_converter`, …) with its own
 `README.md` and `requirements.txt`, and can be used independently. **Conversion runs entirely on local
 files** — no live platform connection is needed at conversion time. Always read the root `README.md`
 and the relevant tool's `README.md` before making changes.
@@ -15,7 +15,7 @@ and the relevant tool's `README.md` before making changes.
 ## Dev environment tips
 
 - **Python version**: Use Python 3.10+ (works for all tools). `cv_converter` and `sna_converter` also
-  run on 3.8+. `aci_converter`, `cv_converter`, `sdwan_converter`, and `sna_converter` use the
+  run on 3.8+. `aci_converter`, `cv_converter`, `fmc_converter`, `sdwan_converter`, and `sna_converter` use the
   **standard library only**;
   `cml_converter` needs `PyYAML`; `config_converter` needs `networkx`. Do not introduce a
   GPL-licensed dependency — this repository is Apache-2.0 (see `NOTICE`).
@@ -50,6 +50,11 @@ python -m config_converter.src.convert \
 
 # cv_converter — build an OT (Purdue/IEC 62443) topology from Cyber Vision CSV exports
 cd cv_converter && python cv_to_ns_commands.py            # auto-detects CSVs in Input_data/
+
+# fmc_converter — one firewall per area from a Firewall Management Center export
+python -m fmc_converter.src.convert \
+    -i fmc_converter/Input_data/fmc_export.json \
+    -o fmc_converter/Output_data/ns_commands_fmc.txt
 
 # sdwan_converter — convert a (bundled, sanitized real) vManage export into underlay + overlay scripts
 python -m sdwan_converter.src.convert \

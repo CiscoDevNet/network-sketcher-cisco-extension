@@ -1,0 +1,27 @@
+{
+  "version": {
+    "value": "1",
+    "description": "Config schema version. Informational.",
+    "sample": "1"
+  },
+  "management_keywords": {
+    "value": ["management", "mgmt", "diagnostic"],
+    "description": "Interface name, security zone, or hardware name containing one of these words is drawn above the firewall. managementOnly interfaces are always treated as management. First match wins, before the top/right/bottom lists.",
+    "sample": ["management", "mgmt", "diagnostic"]
+  },
+  "top_keywords": {
+    "value": ["outside", "internet", "wan", "untrust", "external", "public"],
+    "description": "Words that place an interface above the firewall, next to the management switches.",
+    "sample": ["outside", "internet", "wan", "untrust", "external", "public"]
+  },
+  "right_keywords": {
+    "value": ["dmz"],
+    "description": "Words that place an interface to the right of the firewall.",
+    "sample": ["dmz"]
+  },
+  "bottom_keywords": {
+    "value": ["inside", "internal", "lan", "trust", "users"],
+    "description": "Words that place an interface along the bottom of the firewall. An interface that matches nothing is also placed on the bottom.",
+    "sample": ["inside", "internal", "lan", "trust", "users"]
+  }
+}
