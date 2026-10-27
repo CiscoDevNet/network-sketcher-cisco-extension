@@ -4,6 +4,7 @@
 """Turn an FMC export JSON document into typed records. No placement here."""
 from __future__ import annotations
 
+import ipaddress
 import json
 import pathlib
 from dataclasses import dataclass, field
@@ -21,6 +22,12 @@ class FmcInterface:
     ipv4: str
     vlan: Optional[int] = None
     members: List[str] = field(default_factory=list)
+    ipv6: List[str] = field(default_factory=list)
+
+    @property
+    def cidrs(self) -> List[str]:
+        """IPv4 first, then IPv6."""
+        return ([self.ipv4] if self.ipv4 else []) + list(self.ipv6)
 
 
 @dataclass
@@ -96,6 +103,45 @@ def ipv4_cidr(raw: Any) -> str:
     return f"{address}/{length}" if length is not None else ""
 
 
+def ipv6_cidrs(raw: Any) -> List[str]:
+    """Static ``address/prefix`` entries from the FMC ipv6 object.
+
+    ``linkLocalAddress`` and the router-advertisement ``prefixes`` are not
+    interface addresses. An EUI-64 entry carries only the prefix, so the real
+    address is unknown and the entry is skipped. Link-local entries in the
+    list are skipped as well.
+    """
+    if not isinstance(raw, dict):
+        return []
+    entries = raw.get("addresses") or []
+    if isinstance(entries, dict):
+        entries = [entries]
+    found: List[str] = []
+    for entry in entries:
+        if not isinstance(entry, dict) or _flag(entry.get("enforceEUI64")):
+            continue
+        address = str(entry.get("address") or "").strip()
+        if not address:
+            continue
+        text = address
+        if "/" not in address:
+            try:
+                length = int(str(entry.get("prefix") or "").strip())
+            except ValueError:
+                continue
+            text = f"{address}/{length}"
+        try:
+            iface = ipaddress.IPv6Interface(text)
+        except ValueError:
+            continue
+        if iface.ip.is_link_local:
+            continue
+        cidr = iface.with_prefixlen
+        if cidr not in found:
+            found.append(cidr)
+    return found
+
+
 def _enabled(value: Any) -> bool:
     """FMC usually sends a JSON boolean. A string 'false' must not become True."""
     if value is None:
@@ -158,10 +204,13 @@ def parse_interface(raw: Dict[str, Any]) -> FmcInterface:
         ipv4=ipv4_cidr(raw.get("ipv4")),
         vlan=vlan_id,
         members=members,
+        ipv6=ipv6_cidrs(raw.get("ipv6")),
     )
 
 
-_DEFAULT_DESTINATIONS = {"any-ipv4", "any", "0.0.0.0/0", "0.0.0.0"}
+_DEFAULT_DESTINATIONS = {
+    "any-ipv4", "any", "0.0.0.0/0", "0.0.0.0", "any-ipv6", "::/0", "::",
+}
 
 
 def _route_destinations(raw: Dict[str, Any]) -> List[str]:

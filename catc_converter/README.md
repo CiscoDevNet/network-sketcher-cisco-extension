@@ -110,7 +110,7 @@ Steps 2 and 3 are **independent**: fetch once, convert as many times as you like
 | **Layer3 Virtual Network** (`virtualNetworkName`) | a synthesised **gateway device** `<area>-<VN>-GW` + an `l3_instance` (VRF = VN name) on its SVIs |
 | **anycast gateway** (`vlanId`, `ipPoolName`, `vlanName`) | an **L2 segment** (`Vlan <id>`) **and** an **SVI** `Vlan <id>` on the VN gateway, labelled with the IP-pool name |
 | **fabricDevices** `deviceRoles` (`CONTROL_PLANE` / `BORDER` / `EDGE`) | Attribute-D annotation on the VN gateway; a `BORDER` node adds an external cloud linked to the gateways |
-| **client** (optional, `clients` API) | a host device `EP_<segment>_<n>` under a segment in its site (host side = L3 IP /32·/128, segment side = VLAN) |
+| **client** (optional, `clients` API) | a host device `EP_<segment>_<n>` under a segment in its site (host side = L3 IP /32·/128, segment side = VLAN). A client's IPv6 addresses are drawn next to its IPv4; the link-local `fe80::` address every client reports is not |
 
 The `vlanId` for a segment comes from its `anycastGateway` object; one with none
 is assigned a synthetic id from `vlan_base` (config, default `101`). Overlay

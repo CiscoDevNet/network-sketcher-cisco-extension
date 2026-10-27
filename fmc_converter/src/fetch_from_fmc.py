@@ -179,16 +179,20 @@ def fetch_model(client: FmcClient) -> Dict[str, Any]:
         except (urllib.error.URLError, RuntimeError, ValueError) as exc:
             print(f"    interfaces {device.get('name')}: [skipped: {exc}]", file=sys.stderr)
             device["interfaces"] = []
-        route_path = (
-            f"/api/fmc_config/v1/domain/{domain}/devices/devicerecords/"
-            f"{device_id}/routing/ipv4staticroutes?expanded=true&limit=100"
-        )
-        try:
-            device["static_routes"] = client.items(route_path)
-            _enrich_route_networks(client, device["static_routes"])
-        except (urllib.error.URLError, RuntimeError, ValueError) as exc:
-            print(f"    routes {device.get('name')}: [skipped: {exc}]", file=sys.stderr)
-            device["static_routes"] = []
+        device["static_routes"] = []
+        for family in ("ipv4", "ipv6"):
+            route_path = (
+                f"/api/fmc_config/v1/domain/{domain}/devices/devicerecords/"
+                f"{device_id}/routing/{family}staticroutes?expanded=true&limit=100"
+            )
+            try:
+                routes = client.items(route_path)
+                _enrich_route_networks(client, routes)
+            except (urllib.error.URLError, RuntimeError, ValueError) as exc:
+                print(f"    {family} routes {device.get('name')}: [skipped: {exc}]",
+                      file=sys.stderr)
+                continue
+            device["static_routes"].extend(routes)
         print(
             f"    {device.get('name')}: interfaces={len(device['interfaces'])} "
             f"routes={len(device['static_routes'])}",

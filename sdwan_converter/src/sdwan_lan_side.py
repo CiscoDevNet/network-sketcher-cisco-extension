@@ -70,6 +70,7 @@ class EdgeLanSide:
     loopbacks: List[PortFact]
     vrf_of: Dict[int, str]
     lan_switch_name: Optional[str]
+    ipv6_of: Dict[str, List[str]] = field(default_factory=dict)  # NS port -> IPv6 CIDRs
 
 
 @dataclass
@@ -161,22 +162,26 @@ def plan_service_vpn_lan_side(idx, cfg: Optional[Dict[str, Any]] = None) -> LanS
         excluded=excluded_vpn_ids(cfg),
     )
 
-    records: List[Tuple[Dict[str, Any], List[Tuple[int, Dict[str, Any]]]]] = []
+    records: List[Tuple[Dict[str, Any], List[Tuple[int, Dict[str, Any]]], Dict]] = []
     edge_total = 0
     for dev in idx.devices:
         if topo.device_personality(dev) != "vedge":
             continue
         edge_total += 1
         sysip = str(dev.get("system-ip") or "")
-        svc = topo.service_vpn_interfaces(idx.interfaces.get(sysip, []), plan.excluded)
+        rows = idx.interfaces.get(sysip, [])
+        svc = topo.service_vpn_interfaces(rows, plan.excluded)
         if not svc:
             continue
-        records.append((dev, svc))
+        records.append((dev, svc, topo.ipv6_by_port(rows)))
         plan.vpn_ids.update(vpn_id for vpn_id, _ in svc)
     plan.skipped_edges = edge_total - len(records)
 
     lan_switch_seq = 0
-    for dev, svc in sorted(records, key=lambda r: topo.device_display_name(r[0], naming)):
+    for dev, svc, v6_by_port in sorted(
+        records, key=lambda r: topo.device_display_name(r[0], naming)
+    ):
+        ipv6_of: Dict[str, List[str]] = {}
         claimed_ports: Set[str] = set()
         lan_ports: List[PortFact] = []
         loopbacks: List[PortFact] = []
@@ -196,6 +201,9 @@ def plan_service_vpn_lan_side(idx, cfg: Optional[Dict[str, Any]] = None) -> LanS
                     or topo.cidr_from_mask(ip, "255.255.255.255"))
             bucket = loopbacks if topo.is_loopback_ifname(ifname) else lan_ports
             bucket.append((vpn_id, port, cidr))
+            v6 = v6_by_port.get((vpn_id, str(ifname).strip()), [])
+            if v6:
+                ipv6_of[port] = v6
 
         lan_switch_name: Optional[str] = None
         if lan_ports:
@@ -214,6 +222,7 @@ def plan_service_vpn_lan_side(idx, cfg: Optional[Dict[str, Any]] = None) -> LanS
                 for vpn_id in port_vpn_ids
             },
             lan_switch_name=lan_switch_name,
+            ipv6_of=ipv6_of,
         ))
     return plan
 
@@ -267,9 +276,10 @@ def apply_edge_lan_side(
             dport = _dummy_port(i)
             model.l1_links.append(NSL1Link(edge_name, port, dummy_name, dport))
             out.lan_links += 1
-            if cidr:
+            cidrs = ([cidr] if cidr else []) + lan.ipv6_of.get(port, [])
+            if cidrs:
                 model.ip_assignments.append(
-                    NSIPAssignment(device=edge_name, port=port, cidrs=[cidr]))
+                    NSIPAssignment(device=edge_name, port=port, cidrs=cidrs))
                 out.ip_assignments += 1
             # Both ends share the VRF, so the synthetic switch is split by VRF
             # too rather than reading as one flat LAN. The Dummy side
@@ -282,9 +292,10 @@ def apply_edge_lan_side(
         model.virtual_ports.append(
             NSVirtualPort(device=edge_name, port=port, is_loopback=True))
         out.loopback_ports += 1
-        if cidr:
+        cidrs = ([cidr] if cidr else []) + lan.ipv6_of.get(port, [])
+        if cidrs:
             model.ip_assignments.append(
-                NSIPAssignment(device=edge_name, port=port, cidrs=[cidr]))
+                NSIPAssignment(device=edge_name, port=port, cidrs=cidrs))
             out.ip_assignments += 1
         model.vrf_renames.append((edge_name, port, lan.vrf_of[vpn_id]))
         out.vrf_renames += 1

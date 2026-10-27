@@ -123,6 +123,10 @@ Site grouping is driven by the settings in `sna_to_ns_config.json`. Highlights:
   length), overriding the automatic `/16` grouping.
 - **`name_map`** — rename auto-grouped hub sites to friendly names.
 
+Site grouping is IPv4 only (`/24` segments in `/16` regions). A flow row with
+an IPv6 endpoint is skipped, and the number skipped is printed. An IPv6 prefix
+in `inside_public` is ignored with a warning.
+
 Every parameter in `sna_to_ns_config.json` carries an inline `description` and
 `sample` value documenting its meaning and an example setting.
 

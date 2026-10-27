@@ -527,6 +527,46 @@ def iface_cidr(ip: str, mask: str) -> Optional[str]:
     return f"{ip}/{prefix}"
 
 
+def _address_entry_cidr(entry: Dict) -> Optional[str]:
+    """``<ip>/<prefix>`` from one interface ``addresses`` entry, or None."""
+    addr = entry.get("address") if isinstance(entry, dict) else None
+    if not isinstance(addr, dict):
+        return None
+    ip_obj = addr.get("ipAddress") or {}
+    mask_obj = addr.get("ipMask") or {}
+    ip = str((ip_obj.get("address") if isinstance(ip_obj, dict) else ip_obj) or "").strip()
+    mask = str((mask_obj.get("address") if isinstance(mask_obj, dict) else mask_obj) or "").strip()
+    if ":" not in ip:
+        return iface_cidr(ip, mask)
+    if "/" in ip:
+        text = ip
+    elif mask.isdigit():
+        text = f"{ip}/{mask}"
+    else:
+        return None
+    try:
+        return ipaddress.IPv6Interface(text).with_prefixlen
+    except ValueError:
+        return None
+
+
+def interface_cidrs(itf: Dict) -> List[str]:
+    """Every address of one interface: the primary IPv4 first, then the
+    secondary IPv4 and IPv6 entries of ``addresses``."""
+    found: List[str] = []
+    primary = iface_cidr(itf.get("ipv4Address"), itf.get("ipv4Mask"))
+    if primary:
+        found.append(primary)
+    for entry in itf.get("addresses") or []:
+        kind = str(entry.get("type") or "").upper() if isinstance(entry, dict) else ""
+        if kind == "IPV4_PRIMARY":
+            continue
+        cidr = _address_entry_cidr(entry)
+        if cidr and cidr not in found:
+            found.append(cidr)
+    return found
+
+
 def link_ports_by_device(model: NSModel) -> Dict[str, Set[str]]:
     """{device name -> set of its real L1-link port names} from the model links."""
     out: Dict[str, Set[str]] = {}
@@ -571,8 +611,8 @@ def add_interface_ips(
         dev_link_ports = link_ports.get(devname, set())
         for itf in idx.interfaces.get(str(did), []):
             raw_ip = itf.get("ipv4Address")
-            cidr = iface_cidr(raw_ip, itf.get("ipv4Mask"))
-            if not cidr:
+            cidrs = interface_cidrs(itf)
+            if not cidrs:
                 continue
             raw_port = itf.get("portName") or itf.get("name") or ""
             port = normalise_port_name(raw_port)
@@ -580,13 +620,13 @@ def add_interface_ips(
                 continue
             if port in dev_link_ports:
                 model.ip_assignments.append(
-                    NSIPAssignment(device=devname, port=port, cidrs=[cidr]))
+                    NSIPAssignment(device=devname, port=port, cidrs=cidrs))
                 counts["ip_assignments"] = counts.get("ip_assignments", 0) + 1
             elif raw_port.strip().lower().startswith("loopback"):
                 model.virtual_ports.append(
                     NSVirtualPort(device=devname, port=port, is_loopback=True))
                 model.ip_assignments.append(
-                    NSIPAssignment(device=devname, port=port, cidrs=[cidr]))
+                    NSIPAssignment(device=devname, port=port, cidrs=cidrs))
                 counts["ip_assignments"] = counts.get("ip_assignments", 0) + 1
                 counts["loopbacks"] = counts.get("loopbacks", 0) + 1
             elif str(raw_ip).strip() == (mgmt or "").strip():

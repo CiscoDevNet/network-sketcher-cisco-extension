@@ -340,7 +340,7 @@ def build_physical_model(
     # bare 'unknown_color_label' value for every one of those groups) so the
     # cloud built from it can still report its true colour separately from
     # its (now disambiguated) name -- see the 'colour=' attribute below.
-    port_facts: Dict[Tuple[str, str], Dict[str, str]] = {}
+    port_facts: Dict[Tuple[str, str], Dict[str, Any]] = {}
     unresolved_ports: List[Tuple[str, str]] = []
     for dev in idx.devices:
         if topo.device_personality(dev) != "vedge":
@@ -350,6 +350,7 @@ def build_physical_model(
         if not name:
             continue
         wan_ifaces = idx.wan_interfaces.get(sysip, [])
+        v6_by_port = topo.ipv6_by_port(idx.interfaces.get(sysip, []))
         for itf in topo.physical_wan_interfaces(idx.interfaces.get(sysip, [])):
             ip = itf.get("ip-address") or ""
             cidr = topo.cidr_from_mask(ip, itf.get("ipv4-subnet-mask") or "")
@@ -361,7 +362,9 @@ def build_physical_model(
             color = topo.color_for_ip(wan_ifaces, ip)
             port = normalise_port_name(itf.get("ifname") or "")
             key = (name, port)
-            port_facts[key] = {"ip": ip, "cidr": cidr, "network": network, "color": color or ""}
+            v6 = v6_by_port.get((0, str(itf.get("ifname") or "").strip()), [])
+            port_facts[key] = {"ip": ip, "cidr": cidr, "network": network, "color": color or "",
+                               "v6": v6}
             if not color:
                 unresolved_ports.append(key)
                 counts["unresolved_color"] += 1
@@ -372,14 +375,14 @@ def build_physical_model(
     }
     counts["unresolved_color_segments"] = len(unresolved_group_key)
 
-    edge_ports: Dict[str, Dict[str, Dict[str, str]]] = defaultdict(dict)
+    edge_ports: Dict[str, Dict[str, Dict[str, Any]]] = defaultdict(dict)
     real_color_by_group: Dict[str, str] = {}
     for (name, port), facts in port_facts.items():
         group_key = facts["color"] or unresolved_group_key[(name, port)]
         real_color_by_group.setdefault(group_key, facts["color"] or unknown_color)
         edge_ports[name][port] = {
             "ip": facts["ip"], "cidr": facts["cidr"], "network": facts["network"],
-            "color": group_key,
+            "color": group_key, "v6": facts["v6"],
         }
 
     # ----- PASS 1 (preferred, OBSERVED) -- LLDP/CDP neighbor adjacency ------
@@ -490,7 +493,9 @@ def build_physical_model(
         for i, (devname, port, cidr) in enumerate(sorted(members), start=1):
             cloud_port = f"Dummy {i}"
             model.l1_links.append(NSL1Link(devname, port, seg_name, cloud_port))
-            model.ip_assignments.append(NSIPAssignment(device=devname, port=port, cidrs=[cidr]))
+            v6 = edge_ports.get(devname, {}).get(port, {}).get("v6", [])
+            model.ip_assignments.append(
+                NSIPAssignment(device=devname, port=port, cidrs=[cidr] + list(v6)))
             counts["ip_assignments"] += 1
             # Cloud side ONLY (see the module docstring's L2 SEGMENTS block):
             # this binds the cloud's Dummy ports into one broadcast domain so
@@ -1133,6 +1138,7 @@ def _apply_control_plane_links(
     controller_name: Dict[str, str] = {}    # controller system-ip -> NS name
     controller_port: Dict[str, str] = {}    # NS name -> its real VPN0 port
     controller_cidr: Dict[str, str] = {}    # NS name -> that port's a.b.c.d/nn
+    controller_v6: Dict[str, List[str]] = {}  # NS name -> that port's IPv6 CIDRs
     controller_by_ip: Dict[str, str] = {}   # transport address -> NS name
     for dev in idx.devices:
         if topo.device_personality(dev) not in topo.CONTROLLER_PERSONALITIES:
@@ -1142,6 +1148,7 @@ def _apply_control_plane_links(
         if not name or name not in model.devices:
             continue
         controller_name[sysip] = name
+        v6_by_port = topo.ipv6_by_port(idx.interfaces.get(sysip, []))
         for itf in topo.controller_vpn0_interfaces(idx.interfaces.get(sysip, [])):
             port = normalise_port_name(str(itf.get("ifname") or itf.get("interface") or ""))
             if port and name not in controller_port:
@@ -1151,6 +1158,8 @@ def _apply_control_plane_links(
                 cidr = topo.interface_cidr(itf)
                 if cidr:
                     controller_cidr[name] = cidr
+                controller_v6[name] = v6_by_port.get(
+                    (0, str(itf.get("ifname") or itf.get("interface") or "").strip()), [])
             ip = topo.interface_ip(itf)
             if ip:
                 controller_by_ip.setdefault(ip, name)
@@ -1351,9 +1360,10 @@ def _apply_control_plane_links(
             # the Transport VPN is an Edge concept. Its VPN 512 out-of-band
             # management port is excluded upstream by controller_vpn0_interfaces.
             cidr = controller_cidr.get(name) if own_port else ""
-            if cidr:
+            own_cidrs = ([cidr] if cidr else []) + (controller_v6.get(name, []) if own_port else [])
+            if own_cidrs:
                 model.ip_assignments.append(
-                    NSIPAssignment(device=name, port=own_port, cidrs=[cidr]))
+                    NSIPAssignment(device=name, port=own_port, cidrs=own_cidrs))
                 counts["control_ip_assignments"] += 1
                 counts["ip_assignments"] += 1
             device = model.devices[name]
@@ -1438,13 +1448,14 @@ def _apply_observed_links(
                 model.l1_links.append(NSL1Link(name, local_port, remote_name, remote_port))
                 info = local_ports[local_port]
                 model.ip_assignments.append(
-                    NSIPAssignment(device=name, port=local_port, cidrs=[info["cidr"]]))
+                    NSIPAssignment(device=name, port=local_port,
+                                   cidrs=[info["cidr"]] + list(info.get("v6", []))))
                 counts["ip_assignments"] += 1
                 remote_info = edge_ports.get(remote_name, {}).get(remote_port)
                 if remote_info:
                     model.ip_assignments.append(
                         NSIPAssignment(device=remote_name, port=remote_port,
-                                       cidrs=[remote_info["cidr"]]))
+                                       cidrs=[remote_info["cidr"]] + list(remote_info.get("v6", []))))
                     counts["ip_assignments"] += 1
                 counts["observed_links"] += 1
                 counts[f"observed_links_{kind}"] += 1

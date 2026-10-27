@@ -227,6 +227,11 @@ INC_UDP       = bool(cfg("include_udp", True))
 THRESH        = int(cfg("subnet_min_flows", THRESH))
 # manual overrides (added to auto-detection; manual wins on conflict)
 MAN_INSIDE = tuple(cfg("inside_public", list(INSIDE_PUBLIC)))
+# Site grouping keys on IPv4 /24 and /16, so an IPv6 prefix cannot be an inside range.
+if any(":" in str(p) for p in MAN_INSIDE):
+    print("[WARN] IPv6 prefixes in inside_public are ignored (IPv6 flows are not drawn): %s"
+          % [p for p in MAN_INSIDE if ":" in str(p)])
+    MAN_INSIDE = tuple(p for p in MAN_INSIDE if ":" not in str(p))
 MAN_DC     = set(cfg("dc_force_regions", DC_FORCE_REGIONS))
 MAN_SPUR   = set(cfg("spur_regions", SPUR_REGIONS))
 NAME_MAP   = dict(cfg("name_map", NAME_MAP))
@@ -285,7 +290,10 @@ def is_special(ip):
     if a==198 and b in (18,19): return True              # benchmark 198.18/15
     if ip.startswith(("192.0.2.","198.51.100.","203.0.113.")): return True  # doc
     return False
+def is_ipv6(ip):
+    return ":" in (ip or "")
 def is_inside(ip):
+    if is_ipv6(ip): return False
     return is_rfc1918(ip) or any(ip.startswith(p) for p in INSIDE_PUBLIC)
 def k24(ip):
     p=ip.split("."); return (p[0]+"."+p[1]+"."+p[2]) if len(p)==4 else None
@@ -313,6 +321,7 @@ if AUTO_INSIDE:
         for v in r:
             if len(v)<=mx: continue
             sip=v[Sip];pip=v[Pip]
+            if is_ipv6(sip) or is_ipv6(pip): continue   # counted in the main pass
             rs=is_rfc1918(sip); rp=is_rfc1918(pip)
             if not rs and not is_special(sip):
                 rg=reg16(sip); pub_tot[rg]+=1
@@ -398,6 +407,7 @@ nd_ev=collections.defaultdict(collections.Counter)   # host IP -> {evidence key:
 nd_protos=collections.defaultdict(set)               # host IP -> {routing protocol name,...}
 nd_vendor={}                                         # host IP -> MAC vendor (when the export carries it)
 nd_groups={}                                         # host IP -> SNA host groups (when the export carries it)
+ipv6_rows=0                                          # flow rows with an IPv6 endpoint (not drawn)
 
 with open(CSV,newline="",encoding="utf-8",errors="replace") as fh:
     r=csv.reader(fh); cols=next(r); ix={c:i for i,c in enumerate(cols)}
@@ -414,6 +424,8 @@ with open(CSV,newline="",encoding="utf-8",errors="replace") as fh:
     for v in r:
         if len(v)<=maxix: continue
         sip=v[Sip];pip=v[Pip]                            # sip=client, pip=server
+        if is_ipv6(sip) or is_ipv6(pip):                 # IPv4-only site grouping
+            ipv6_rows+=1; continue
         proto=(v[PrS] or "").upper()
         try: sport=int(v[Pp])
         except: sport=-1
@@ -1089,6 +1101,7 @@ if not args.no_flow:
             if len(v)<=mxi: continue
             proto=(v[PrS] or "").upper()
             if proto not in ("TCP","UDP"): continue
+            if is_ipv6(v[Sip]) or is_ipv6(v[Pip]): continue
             try: port=int(v[Pp])
             except: continue
             if port<=0: continue
@@ -1113,6 +1126,9 @@ if not args.no_flow:
             w.writerow([i,s,d,proto,svc_label(port),fmt_bw(mbps)]+[""]*9)
     n_flow=len(rows)
 
+if ipv6_rows:
+    print("[NOTE] %d flow row(s) with an IPv6 endpoint were skipped (IPv6 flows are not drawn)"
+          % ipv6_rows)
 print("===== AUTO-DETECTION (manual overrides take precedence) =====")
 print("  inside_public : auto=%s  manual=%s  -> used=%s"
       %(sorted(auto_inside),list(MAN_INSIDE),list(INSIDE_PUBLIC)))

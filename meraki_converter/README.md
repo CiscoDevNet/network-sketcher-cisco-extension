@@ -267,6 +267,11 @@ Each key has a `value` (used by the tool) plus `description`/`sample`.
   set (appliance VLANs + switch access/native + SVIs), capped at 64.
 - Appliance/switch **static routes** are fetched but **not drawn** (no NS
   representation yet).
+- **IPv6** is drawn next to IPv4 where the export states it: an appliance
+  VLAN's or single LAN's static prefix assignment (`staticApplianceIp6` +
+  `staticPrefix`), a switch SVI's static `ipv6.address`, and a client's `ip6`
+  (not `ip6Local`). Prefixes delegated from the WAN are resolved by the MX at
+  run time and are not drawn. An address with no prefix length is not written.
 - The MV camera maps to the NS `Server` stencil (NS has no Camera stencil).
 
 ## Directory structure

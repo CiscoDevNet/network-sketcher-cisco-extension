@@ -307,6 +307,12 @@ upstream Network Sketcher behaviour, not something this converter emits; see
   (§3.3).
 - **WayPoint left-to-right ordering is an ESTIMATE**, not a guaranteed
   pixel-optimal layout (§5.5).
+- **IPv6 is drawn on dual-stack ports only.** A port's global or unique-local
+  IPv6 (`ipv6-address` on Viptela-OS, `ipv6-addrs` on IOS-XE, read only when it
+  carries a prefix length) is added next to its IPv4 address. A port with no
+  IPv4 address is not drawn, and link-local addresses are left out. The `-`
+  vManage writes for a missing address is treated as no address, so a
+  controller's VPN 0 link uses the port that really carries its address.
 
 ## `fetch_from_vmanage.py` — pulling the model over the REST API
 

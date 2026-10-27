@@ -108,7 +108,7 @@ import itertools
 import re
 from collections import defaultdict
 from dataclasses import dataclass, field, replace as _dc_replace
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Dict, List, Optional, Set, Tuple, Union
 
 try:
     import networkx as nx
@@ -116,7 +116,7 @@ except ImportError:  # pragma: no cover -- stdlib-only fallback (DESIGN.md 4.3.4
     nx = None  # type: ignore[assignment]
 
 from . import layout
-from .config_parser import AclDefinition, IPv4Addr, ParsedConfig, ParsedInterface
+from .config_parser import AclDefinition, IPv4Addr, IPv6Addr, ParsedConfig, ParsedInterface
 from .ns_model import (
     NSDevice, NSIPAssignment, NSL1Link, NSL2Segment, NSModel,
     NSPortChannel, NSSubInterface, NSVirtualPort, build_area_layout,
@@ -155,7 +155,7 @@ class SubnetCandidate:
     (DESIGN.md section 4.3.1)."""
     device: str
     interface: str
-    addr: Optional[IPv4Addr] = None
+    addr: Optional[Union[IPv4Addr, IPv6Addr]] = None
     other_subnet_degree: int = 0       # DESIGN.md 4.3.2 "degree(x)"
     site_hint: Optional[str] = None    # populated when site_scoping is enabled (DESIGN.md 4.3.6 NAT mitigation)
     network: str = ""                  # bookkeeping only: this candidate's SubnetGroup.network (for config_excluded_links.csv)
@@ -165,8 +165,9 @@ class SubnetCandidate:
 @dataclass
 class SubnetGroup:
     """All candidates sharing one network address + prefix length."""
-    network: str                        # e.g. '192.0.2.0/30'
+    network: str                        # e.g. '192.0.2.0/30' or '2001:db8:0:9::/127'
     prefix_len: int = 32                # cached from `network` for large_subnet_prefix_threshold comparisons (DESIGN.md 4.3.3)
+    version: int = 4                    # 6 selects large_subnet_prefix_threshold_v6
     candidates: List[SubnetCandidate] = field(default_factory=list)
     has_virtual_ip: bool = False        # True if any HSRP/VRRP/GLBP virtual IP was seen in this subnet (DESIGN.md 4.3.3)
 
@@ -208,6 +209,42 @@ def _site_hint_from_source(source_filename: Optional[str]) -> Optional[str]:
     return source_filename.split("/", 1)[0]
 
 
+def _matching_addresses(
+    iface: ParsedInterface,
+) -> List[Tuple[Union[IPv4Addr, IPv6Addr], Union[ipaddress.IPv4Network, ipaddress.IPv6Network]]]:
+    """Addresses of ``iface`` that take part in same-subnet matching.
+
+    IPv4 primary and secondary, except /32. IPv6 only when the interface has
+    no such IPv4 address, so a dual-stack link is matched once; /128 and
+    link-local, multicast, loopback, unspecified and site-local IPv6 never
+    form a link.
+    """
+    found = []
+    for addr in list(iface.ipv4) + list(iface.ipv4_secondary):
+        if addr.prefix >= 32:
+            continue
+        try:
+            network = ipaddress.IPv4Network(f"{addr.address}/{addr.prefix}", strict=False)
+        except ValueError:
+            continue
+        found.append((addr, network))
+    if found:
+        return found
+    for addr6 in iface.ipv6:
+        if addr6.prefix >= 128:
+            continue
+        try:
+            host = ipaddress.IPv6Address(addr6.address)
+            network6 = ipaddress.IPv6Network(f"{addr6.address}/{addr6.prefix}", strict=False)
+        except ValueError:
+            continue
+        if (host.is_link_local or host.is_multicast or host.is_loopback
+                or host.is_unspecified or host.is_site_local):
+            continue
+        found.append((addr6, network6))
+    return found
+
+
 def build_subnet_groups(configs: Dict[str, ParsedConfig], cfg: Dict) -> List[SubnetGroup]:
     """Group every routed interface IP (across all devices) by network
     address + prefix length (DESIGN.md 4.3.1).
@@ -230,17 +267,13 @@ def build_subnet_groups(configs: Dict[str, ParsedConfig], cfg: Dict) -> List[Sub
             if iface.shutdown or iface.kind == "loopback":
                 continue
             has_vip = bool(iface.virtual_ips)
-            for addr in list(iface.ipv4) + list(iface.ipv4_secondary):
-                if addr.prefix >= 32:
-                    continue
-                try:
-                    network = ipaddress.IPv4Network(f"{addr.address}/{addr.prefix}", strict=False)
-                except ValueError:
-                    continue
+            for addr, network in _matching_addresses(iface):
                 key = str(network)
                 group = groups.get(key)
                 if group is None:
-                    group = SubnetGroup(network=key, prefix_len=addr.prefix)
+                    group = SubnetGroup(
+                        network=key, prefix_len=addr.prefix, version=network.version,
+                    )
                     groups[key] = group
                 group.candidates.append(SubnetCandidate(
                     device=device, interface=ifname, addr=addr, network=key,
@@ -262,7 +295,8 @@ def needs_l2_switch_inference(group: SubnetGroup, cfg: Dict) -> bool:
     Returns True (i.e. "an L2 switch belongs here") iff ANY of:
       - len(group.candidates) >= 3, OR
       - group.has_virtual_ip is True (HSRP/VRRP/GLBP seen in this subnet), OR
-      - group.prefix_len <= cfg['large_subnet_prefix_threshold'] (default 24
+      - group.prefix_len <= cfg['large_subnet_prefix_threshold'] (default 24,
+        or cfg['large_subnet_prefix_threshold_v6'] default 64 for an IPv6 group
         -- i.e. /24, /23, /22, ... have far more free addresses than a
         typical /30-/29 point-to-point link and likely have a real switch
         behind them).
@@ -278,7 +312,10 @@ def needs_l2_switch_inference(group: SubnetGroup, cfg: Dict) -> bool:
         return True
     if group.has_virtual_ip:
         return True
-    threshold = cfg.get("large_subnet_prefix_threshold", 24)
+    if group.version == 6:
+        threshold = cfg.get("large_subnet_prefix_threshold_v6", 64)
+    else:
+        threshold = cfg.get("large_subnet_prefix_threshold", 24)
     if group.prefix_len <= threshold:
         return True
     return False
@@ -304,13 +341,7 @@ def compute_other_subnet_degree(configs: Dict[str, ParsedConfig]) -> Dict[Tuple[
         for ifname, iface in parsed.interfaces.items():
             if iface.shutdown or iface.kind == "loopback":
                 continue
-            for addr in list(iface.ipv4) + list(iface.ipv4_secondary):
-                if addr.prefix >= 32:
-                    continue
-                try:
-                    network = ipaddress.IPv4Network(f"{addr.address}/{addr.prefix}", strict=False)
-                except ValueError:
-                    continue
+            for _addr, network in _matching_addresses(iface):
                 key = str(network)
                 device_subnets[device].add(key)
                 iface_subnets[(device, ifname)].add(key)
@@ -2434,7 +2465,7 @@ def apply_parsed_configs(
             ns_port = normalise_port_name(iname)
 
             if iface.kind == "svi":
-                if not is_endpoint and iface.ipv4:
+                if not is_endpoint and iface.has_ip():
                     vid = _vlan_id_from_ifname(iname)
                     svi_claimed_by_l1 = (label, ns_port) in l1_endpoints
                     if svi_claimed_by_l1:
@@ -2453,7 +2484,7 @@ def apply_parsed_configs(
                         ))
                         model.ip_assignments.append(NSIPAssignment(
                             device=label, port=ns_port,
-                            cidrs=[a.cidr for a in list(iface.ipv4) + list(iface.ipv4_secondary)],
+                            cidrs=iface.all_cidrs(),
                         ))
                         if iface.vrf:
                             model.vrf_renames.append((label, ns_port, iface.vrf))
@@ -2465,13 +2496,13 @@ def apply_parsed_configs(
                     st["svi"] += 1
 
             elif iface.kind == "loopback":
-                if iface.ipv4:
+                if iface.has_ip():
                     model.virtual_ports.append(NSVirtualPort(
                         device=label, port=ns_port, is_loopback=True,
                     ))
                     model.ip_assignments.append(NSIPAssignment(
                         device=label, port=ns_port,
-                        cidrs=[a.cidr for a in list(iface.ipv4) + list(iface.ipv4_secondary)],
+                        cidrs=iface.all_cidrs(),
                     ))
                     if iface.vrf:
                         model.vrf_renames.append((label, ns_port, iface.vrf))
@@ -2499,11 +2530,11 @@ def apply_parsed_configs(
                     and int(po_id_match.group(1)) in channel_groups_with_members
                 )
                 po_claimed_by_l1 = (label, ns_port) in l1_endpoints or po_bulk_registered
-                if iface.ipv4:
+                if iface.has_ip():
                     if po_claimed_by_l1:
                         model.ip_assignments.append(NSIPAssignment(
                             device=label, port=ns_port,
-                            cidrs=[a.cidr for a in list(iface.ipv4) + list(iface.ipv4_secondary)],
+                            cidrs=iface.all_cidrs(),
                         ))
                         st["l3_phys"] += 1
                     else:
@@ -2601,11 +2632,11 @@ def apply_parsed_configs(
                             device=label, parent_port=parent_port,
                             subif_port=ns_port, vlan_id=iface.access_vlan,
                         ))
-                    if iface.ipv4:
+                    if iface.has_ip():
                         if phys_claimed_by_l1:
                             model.ip_assignments.append(NSIPAssignment(
                                 device=label, port=ns_port,
-                                cidrs=[a.cidr for a in list(iface.ipv4) + list(iface.ipv4_secondary)],
+                                cidrs=iface.all_cidrs(),
                             ))
                             if iface.vrf:
                                 model.vrf_renames.append((label, ns_port, iface.vrf))
@@ -2613,11 +2644,11 @@ def apply_parsed_configs(
                         else:
                             skip_notes.append(_l1_unclaimed_skip_note(label, ns_port, "ip_address_bulk"))
                     continue
-                if iface.is_routed() and iface.ipv4:
+                if iface.is_routed() and iface.has_ip():
                     if phys_claimed_by_l1:
                         model.ip_assignments.append(NSIPAssignment(
                             device=label, port=ns_port,
-                            cidrs=[a.cidr for a in list(iface.ipv4) + list(iface.ipv4_secondary)],
+                            cidrs=iface.all_cidrs(),
                         ))
                         if iface.vrf:
                             model.vrf_renames.append((label, ns_port, iface.vrf))
@@ -2626,11 +2657,11 @@ def apply_parsed_configs(
                         skip_notes.append(_l1_unclaimed_skip_note(label, ns_port, "ip_address_bulk"))
                 else:
                     if is_endpoint:
-                        if iface.ipv4:
+                        if iface.has_ip():
                             if phys_claimed_by_l1:
                                 model.ip_assignments.append(NSIPAssignment(
                                     device=label, port=ns_port,
-                                    cidrs=[a.cidr for a in iface.ipv4],
+                                    cidrs=[a.cidr for a in list(iface.ipv4) + list(iface.ipv6)],
                                 ))
                                 st["l3_phys"] += 1
                             else:
@@ -2661,11 +2692,11 @@ def apply_parsed_configs(
                             skip_notes.append(_l1_unclaimed_skip_note(label, ns_port, "l2_segment_bulk"))
 
             elif iface.kind == "mgmt":
-                if iface.ipv4:
+                if iface.has_ip():
                     if (label, ns_port) in l1_endpoints:
                         model.ip_assignments.append(NSIPAssignment(
                             device=label, port=ns_port,
-                            cidrs=[a.cidr for a in list(iface.ipv4) + list(iface.ipv4_secondary)],
+                            cidrs=iface.all_cidrs(),
                         ))
                         if iface.vrf:
                             model.vrf_renames.append((label, ns_port, iface.vrf))

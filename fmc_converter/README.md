@@ -107,8 +107,16 @@ verification is **off** unless you pass `--verify-tls`. `--probe` checks the
 login and the server version, then exits without writing a file.
 
 The export contains the FMC version, the device records, HA pairs, each
-device's interfaces, and its IPv4 static routes. A default route (`0.0.0.0/0`)
-is drawn as the address of the grey switch facing that egress interface.
+device's interfaces, and its IPv4 and IPv6 static routes. A default route
+(`0.0.0.0/0` or `::/0`) is drawn as the address of the grey switch facing that
+egress interface, in the prefix of the interface address of the same family.
+An IPv6 default route whose next hop is link-local (`fe80::/10`) is not drawn,
+because Network Sketcher does not accept link-local addresses; the report
+lists it.
+
+Interfaces carry their static IPv4 address and their static IPv6 addresses
+(dual stack). The IPv6 link-local address, EUI-64 addresses, SLAAC/DHCPv6 and
+router-advertisement prefixes are not drawn.
 The firewall's management interface often has no IPv4 address in this API;
 the device hostname is a separate field. The FMC appliance's own management
 address and default gateway are not in the REST API (they are CLI settings),

@@ -114,6 +114,7 @@ def network_l2_info(net: Dict[str, Any]) -> Dict[str, Any]:
     """Extract the fields the overlay needs from a Network object.
 
     Returns: {name, vni, vrf, vlan_id, gw_v4, gw_v6, vlan_name, description}.
+    ``gw_v6`` is a list: NDFC's IPv6 Gateway/Prefix List is comma-separated.
     """
     cfg = template_config(net, "networkTemplateConfig", "displayValues")
     vlan = cfg.get("vlanId") or net.get("vlanId") or ""
@@ -122,7 +123,11 @@ def network_l2_info(net: Dict[str, Any]) -> Dict[str, Any]:
     except (ValueError, TypeError):
         vlan_id = None
     gw4 = (cfg.get("gatewayIpAddress") or "").strip()
-    gw6 = (cfg.get("gatewayIpV6Address") or "").strip()
+    gw6 = [
+        part.strip()
+        for part in str(cfg.get("gatewayIpV6Address") or "").split(",")
+        if part.strip()
+    ]
     return {
         "name": net.get("networkName") or cfg.get("networkName") or "",
         "display": net.get("displayName") or net.get("networkName") or "",

@@ -69,6 +69,16 @@ validated one). **Copy them into your new converter unmodified.** The
 `platform_stencil_mapper` import at your new converter's real stencil-mapper
 module name.
 
+**IPv4 and IPv6 addresses go in the same `NSIPAssignment.cidrs` list** (IPv4
+first), one entry per port. `cmd_add_ip_address_bulk` passes IPv4 through
+unchanged and writes IPv6 in compressed form. It leaves out IPv6 that Network
+Sketcher does not accept (no prefix length, zone index, link-local, multicast,
+loopback, unspecified, IPv4-mapped, site-local) and records each one in
+`CommandScript.dropped_ips`; `convert.py.template`'s `_note_dropped_ips` turns
+that list into a report note. A mapper still has to skip link-local addresses
+a platform reports for every host (for example Catalyst Center clients),
+otherwise every run produces the same noise note.
+
 Everything else is real work specific to your platform:
 
 - **`fetch_from_<platform>.py`** (only if the platform has a read-only API —

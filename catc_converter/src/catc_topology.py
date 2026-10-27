@@ -354,7 +354,10 @@ def apply_ap_flexconnect(
     model.virtual_ports.append(NSVirtualPort(ap_name, svi))
     model.l2_segments_svi.append(NSL2Segment(ap_name, svi, [f"Vlan{vnum}"]))
     if mgmt_ip:
-        model.ip_assignments.append(NSIPAssignment(ap_name, svi, [f"{mgmt_ip}/{prefixlen}"]))
+        # ``prefixlen`` comes from the IPv4 segment, so an IPv6 management
+        # address is written as a host route instead.
+        cidr = f"{mgmt_ip}/128" if ":" in mgmt_ip else f"{mgmt_ip}/{prefixlen}"
+        model.ip_assignments.append(NSIPAssignment(ap_name, svi, [cidr]))
         if counts is not None:
             counts["ip_assignments"] = counts.get("ip_assignments", 0) + 1
     return svi

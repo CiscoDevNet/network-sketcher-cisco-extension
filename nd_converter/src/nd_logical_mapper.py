@@ -184,7 +184,7 @@ def build_logical_model(
             if vrf:
                 gw = _gateway(fabric, vrf)
                 # Anycast gateway SVI on the VRF gateway.
-                gw_subnets = [s for s in (ninfo["gw_v4"], ninfo["gw_v6"]) if s]
+                gw_subnets = [s for s in [ninfo["gw_v4"], *ninfo["gw_v6"]] if s]
                 if gw_subnets:
                     model.virtual_ports.append(NSVirtualPort(device=gw, port=svi, vlan_id=vid))
                     model.ip_assignments.append(NSIPAssignment(device=gw, port=svi, cidrs=gw_subnets))

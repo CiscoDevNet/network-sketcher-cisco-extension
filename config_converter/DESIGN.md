@@ -486,7 +486,10 @@ This is the core of `config_converter` and the part with the highest degree of n
 #### 4.3.1 Problem Formulation
 
 1. Collect a list of `(device, interface, ip, prefixlen)` from all devices and all interfaces.
-2. Group by **network address** as key (`ipaddress.IPv4Network(f"{ip}/{prefixlen}", strict=False)`).
+2. Group by **network address** as key (`ipaddress.IPv4Network(f"{ip}/{prefixlen}", strict=False)`;
+   `IPv6Network` for an interface that has no IPv4 candidate, so a dual-stack link is grouped
+   once. `/32` and `/128`, and link-local / multicast / loopback / unspecified / site-local IPv6,
+   are never candidates. An IPv6 group uses `large_subnet_prefix_threshold_v6`, default 64, in 4.3.3).
    Interface sets sharing the same network address + same prefix length are called "subnet candidate
    groups."
 3. Branch by element count `k` of each subnet candidate group:
@@ -1032,8 +1035,9 @@ ELSE:
 - Must support both named and numbered ACLs.
 - Indirect ACL references via object-group (`object-group network`, etc., ASA/FTD family) are
   not supported in Phase 1 (undetermined = normal device treatment).
-- IPv6-only ACLs (`ipv6 access-list`) are out of scope for this document
-  (`config_converter` is IPv4-first by design — other converters are also IPv4-centric).
+- IPv6 ACLs (`ipv6 access-list`, `ipv6 traffic-filter`) are out of scope for this document.
+  Interface IPv6 addresses are drawn (4.3.1), but the closed-environment verdict is IPv4 only,
+  so a dual-stack interface whose IPv4 ACL denies everything can still be judged closed.
 
 **Items confirmed in §8 (already reflected in this section)**:
 - Representation of closed-judgment devices is unified as placement in a dedicated isolation area → §4.7.1

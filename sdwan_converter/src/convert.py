@@ -94,6 +94,20 @@ def _write_csv(path: pathlib.Path, rows: List[List[str]]) -> None:
         csv.writer(fh).writerows(rows)
 
 
+def _note_dropped_ips(script, notes: List[str]) -> None:
+    """Add a note listing addresses Network Sketcher would reject."""
+    dropped = script.dropped_ips
+    if not dropped:
+        return
+    shown = "; ".join(f"{d} {p} {a} ({r})" for d, p, a, r in dropped[:20])
+    more = f"; and {len(dropped) - 20} more" if len(dropped) > 20 else ""
+    notes.append(
+        f"{len(dropped)} IPv6 address(es) left out because Network Sketcher "
+        f"does not accept them: {shown}{more}."
+    )
+    print(f"  [note] left out {len(dropped)} IPv6 address(es) Network Sketcher does not accept")
+
+
 def _write_report(path: pathlib.Path, title: str, counts: Dict[str, int],
                   caveats: List[str]) -> None:
     lines = [f"# {title}\n"]
@@ -115,6 +129,7 @@ def _run_underlay(idx, cfg, layout, out_dir, stem) -> None:
     print("[underlay] building physical underlay model ...")
     model, info = build_physical_model(idx, cfg, layout=layout)
     script = build_command_script(model)
+    _note_dropped_ips(script, info["caveats"])
 
     underlay_name = f"{stem}_sdwan_underlay.txt"
     (out_dir / underlay_name).write_text(script.text(), encoding="utf-8")
@@ -161,6 +176,7 @@ def _run_overlay(idx, cfg, layout, out_dir, stem) -> None:
     # Overlay ports are logical ('Dummy' links on the cloud side) — mark
     # Speed/Duplex/Port Type as Unknown rather than inventing physical values.
     script = build_command_script(model, port_info_unknown=True)
+    _note_dropped_ips(script, info["caveats"])
 
     overlay_name = f"{stem}_sdwan_overlay.txt"
     (out_dir / overlay_name).write_text(script.text(), encoding="utf-8")

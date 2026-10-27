@@ -84,7 +84,9 @@ Routing Capability → Router) and the per-asset Purdue level.
 
 Noise groups (`Broadcast Components`, `Multicast`, `IPv6 Components`,
 `Packet Reply`, `To be investigated`) and non-routable IPs are excluded by
-default — toggle with `exclude_noise_groups` in the config. Assets whose
+default — toggle with `exclude_noise_groups` in the config. Assets with an
+IPv6 address are not drawn; they are listed in `out_of_scope.csv` as
+`IPv6 asset (not drawn)`, and their activities are dropped. Assets whose
 Group cell is empty are kept. They are split by IPv4 /24 and each prefix
 becomes its own group, named like `dummy_(192.168.50.0_24)`. A `/` in any
 area name is written as `_`. The resulting name is classified like any other

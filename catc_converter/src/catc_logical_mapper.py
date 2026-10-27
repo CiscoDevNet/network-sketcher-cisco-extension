@@ -90,6 +90,29 @@ def _host_cidr(ip: str) -> str:
     return f"{ip}/128" if ":" in ip else f"{ip}/32"
 
 
+def _routable_ipv6(values: Any) -> List[str]:
+    """Client IPv6 addresses worth drawing.
+
+    Catalyst Center lists every client's link-local address; those, and other
+    kinds Network Sketcher does not accept, are not client addresses to draw.
+    """
+    if isinstance(values, str):
+        values = [values]
+    found: List[str] = []
+    for raw in values or []:
+        text = str(raw or "").strip()
+        try:
+            addr = ipaddress.IPv6Address(text.split("/", 1)[0])
+        except ValueError:
+            continue
+        if (addr.is_link_local or addr.is_multicast or addr.is_loopback
+                or addr.is_unspecified or addr.is_site_local or addr.ipv4_mapped):
+            continue
+        if text not in found:
+            found.append(text)
+    return found
+
+
 def sanitize(name: str) -> str:
     """Keep NS-safe characters (no quotes / brackets). Collapse whitespace.
 
@@ -542,6 +565,7 @@ def build_logical_model(
                     hattr.append("/".join(bits))
                 if c.get("ipv4Address"):
                     ips.append(_host_cidr(str(c["ipv4Address"])))
+                ips.extend(_host_cidr(ip6) for ip6 in _routable_ipv6(c.get("ipv6Addresses")))
             if len(members) > len(capped):
                 hattr.append(f"... +{len(members) - len(capped)} more")
             model.devices[host] = NSDevice(

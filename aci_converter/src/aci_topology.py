@@ -79,13 +79,6 @@ class Endpoint:
     access: str = ""        # physical port or vPC policy-group name
     is_vpc: bool = False
 
-    def best_ip(self) -> str:
-        """Prefer an IPv4 address for display; fall back to IPv6 / ''."""
-        v4 = [x for x in self.ips if ":" not in x]
-        if v4:
-            return v4[0]
-        return self.ips[0] if self.ips else ""
-
 
 def endpoints_by_epg(idx) -> Dict[str, List[Endpoint]]:
     """{epg_dn: [Endpoint, ...]} from fvCEp + fvIp + fvRsCEpToPathEp.

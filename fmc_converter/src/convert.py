@@ -58,6 +58,20 @@ def _write_csv(path: pathlib.Path, rows: List[List[str]]) -> None:
         csv.writer(fh).writerows(rows)
 
 
+def _note_dropped_ips(script, notes: List[str]) -> None:
+    """Add a note listing addresses Network Sketcher would reject."""
+    dropped = script.dropped_ips
+    if not dropped:
+        return
+    shown = "; ".join(f"{d} {p} {a} ({r})" for d, p, a, r in dropped[:20])
+    more = f"; and {len(dropped) - 20} more" if len(dropped) > 20 else ""
+    notes.append(
+        f"{len(dropped)} IPv6 address(es) left out because Network Sketcher "
+        f"does not accept them: {shown}{more}."
+    )
+    print(f"  [note] left out {len(dropped)} IPv6 address(es) Network Sketcher does not accept")
+
+
 def _write_report(path: pathlib.Path, report: MapperReport, n_commands: int) -> None:
     lines = [
         "# Secure Firewall Management Center -> Network Sketcher — Conversion Report\n",
@@ -132,6 +146,7 @@ def main(argv: Optional[list] = None) -> int:
     print("[2/2] Building NSModel and generating commands ...")
     model, _devices, report = build_model(data, cfg)
     script = build_command_script(model)
+    _note_dropped_ips(script, report.notes)
     n_commands = sum(script.counts.values())
 
     (out_dir / f"{stem}.txt").write_text(script.text(), encoding="utf-8")

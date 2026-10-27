@@ -9,8 +9,8 @@ conversion time.
 
 > Validated end-to-end against the bundled `sample1/` corpus (IOS / IOS-XE /
 > NX-OS / IOS-XR / ASA) and a live Network Sketcher instance. Treat the
-> output as a starting reference — links are inferred from IPv4 subnets, not
-> from CDP/LLDP. For parsing rules, topology inference, layout, and known
+> output as a starting reference — links are inferred from IPv4 subnets (and
+> IPv6 subnets on ports with no IPv4 address), not from CDP/LLDP. For parsing rules, topology inference, layout, and known
 > edge cases, see [`DESIGN.md`](DESIGN.md).
 
 <img alt="Topology reconstructed from running-config text files — L1 view" src="https://github.com/user-attachments/assets/9af782bf-2cb0-47d4-95c6-31329ca27492" />
@@ -46,8 +46,8 @@ current release (see `DESIGN.md` §4.2–§4.8 and the Phase 6 roadmap):
 
 - **No live device or API connection** — input is running-config text files only
   (no SSH, SNMP, APIC, FMC/FDM REST, or DCNM API at conversion time).
-- **No CDP/LLDP neighbour data** — links are inferred from IPv4 subnet
-  matching, not from neighbour tables. Pure L2 trunk/access ports with no L3
+- **No CDP/LLDP neighbour data** — links are inferred from subnet matching,
+  not from neighbour tables. Pure L2 trunk/access ports with no L3
   address cannot be discovered on their own (IP reachability only). CDP/LLDP
   auxiliary input is a **Phase 6** optional extension.
 - **No explicit cabling** — there is no port-to-port wiring in a running-config;
@@ -66,8 +66,22 @@ current release (see `DESIGN.md` §4.2–§4.8 and the Phase 6 roadmap):
   ACL bodies are used only for conservative "closed environment" hints when the
   full ACL is present in the same file; object-groups, cross-device ACL
   templates, and path-aware reachability are not evaluated.
-- **IPv6-only configs** — parsing and subnet matching are IPv4-first (RFC 1918 /
-  RFC 5737 documentation addresses in bundled samples).
+- **IPv6 beyond interface addresses** — IPv6 ACLs (`ipv6 traffic-filter`),
+  HSRP/VRRP IPv6 virtual addresses, IPv6 BGP peers and general-prefix
+  (`ipv6 address PREFIX ::1/64`) forms are not read. The bundled samples are
+  IPv4 only.
+
+#### IPv6
+
+`ipv6 address <addr>/<len>` (IOS / IOS-XE / NX-OS / IOS-XR / ASA) is drawn next
+to the IPv4 address of the same interface. Link-local, EUI-64, `autoconfig` and
+`dhcp` lines carry no address to draw and are skipped. An IPv6 subnet forms a
+link only on interfaces that have no IPv4 address to match on, so a dual-stack
+link is matched once on IPv4. `/128` addresses never form a link; an IPv6
+subnet with a prefix of `large_subnet_prefix_threshold_v6` (default 64) or
+shorter is treated as a shared LAN segment, and `/127` stays a direct link.
+IPv6 that Network Sketcher does not accept is left out and listed in
+`config_report.md`.
 
 Because running-config bundles contain **no explicit cabling**, the topology is
 **inferred** from same-subnet IP matching (plus degree-similarity / Blossom

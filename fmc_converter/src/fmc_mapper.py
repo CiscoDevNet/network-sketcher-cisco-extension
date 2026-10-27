@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import ipaddress
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
 from .fmc_reader import FmcData, FmcDevice, FmcInterface
 from .fmc_stencil_mapper import map_firewall, map_fmc, map_switch, map_waypoint
@@ -47,8 +47,8 @@ class _Drawn:
     title: str
     ports: List[str]
     ip_port: str
-    ipv4: str
-    subifs: List[Tuple[str, str, Optional[int], str]] = field(default_factory=list)
+    cidrs: List[str]
+    subifs: List[Tuple[str, str, Optional[int], List[str]]] = field(default_factory=list)
     portchannel: str = ""
 
 
@@ -90,8 +90,11 @@ def classify_interface(iface: FmcInterface, keywords: Dict[str, List[str]]) -> s
     return "bottom"
 
 
-def gateway_cidr(gateway: str, interface_cidr: str) -> str:
-    """Put the next hop in the interface subnet when it belongs there."""
+def gateway_cidr(gateway: str, interface_cidrs: Union[str, Sequence[str]]) -> str:
+    """Put the next hop in the interface subnet of the same address family.
+
+    Without a matching subnet the next hop is a host route (/32 or /128).
+    """
     text = (gateway or "").strip()
     if not text:
         return ""
@@ -101,16 +104,16 @@ def gateway_cidr(gateway: str, interface_cidr: str) -> str:
         host = ipaddress.ip_address(text)
     except ValueError:
         return ""
-    if interface_cidr:
+    if isinstance(interface_cidrs, str):
+        interface_cidrs = [interface_cidrs] if interface_cidrs else []
+    for cidr in interface_cidrs:
         try:
-            iface = ipaddress.ip_interface(
-                interface_cidr if "/" in interface_cidr else f"{interface_cidr}/32"
-            )
-            if host in iface.network:
-                return f"{host}/{iface.network.prefixlen}"
+            iface = ipaddress.ip_interface(cidr)
         except ValueError:
-            pass
-    return f"{host}/32"
+            continue
+        if iface.version == host.version and host in iface.network:
+            return f"{host.compressed}/{iface.network.prefixlen}"
+    return f"{host.compressed}/{host.max_prefixlen}"
 
 
 def facing_port(firewall_port: str) -> str:
@@ -217,6 +220,10 @@ class _Canvas:
                 return
         self.model.ip_assignments.append(NSIPAssignment(device, port, [cidr]))
 
+    def add_ips(self, device: str, port: str, cidrs: Sequence[str]) -> None:
+        for cidr in cidrs:
+            self.add_ip(device, port, cidr)
+
     def _dummy(self, area: str, role: str, counters: Dict[str, int]) -> str:
         counters[role] = counters.get(role, 0) + 1
         number = counters[role]
@@ -242,20 +249,20 @@ class _Canvas:
             self.model.port_channels.append(
                 NSPortChannel(drawn.device, list(drawn.ports), drawn.portchannel)
             )
-            self.add_ip(drawn.device, drawn.portchannel, drawn.ipv4)
+            self.add_ips(drawn.device, drawn.portchannel, drawn.cidrs)
         else:
-            self.add_ip(drawn.device, drawn.ip_port, drawn.ipv4)
-        for parent, subif, vlan, cidr in drawn.subifs:
+            self.add_ips(drawn.device, drawn.ip_port, drawn.cidrs)
+        for parent, subif, vlan, cidrs in drawn.subifs:
             self.model.subinterfaces.append(
                 NSSubInterface(drawn.device, parent, subif, vlan)
             )
-            self.add_ip(drawn.device, subif, cidr)
+            self.add_ips(drawn.device, subif, cidrs)
         self.placements.append(
             f"{drawn.device} {drawn.title} -> {drawn.role} {dummy}"
         )
         if drawn.title and first_dummy_port:
             self.facing[(drawn.device, drawn.title.casefold())] = (
-                dummy, first_dummy_port, drawn.ipv4,
+                dummy, first_dummy_port, list(drawn.cidrs),
             )
 
     def _apply_gateways(self, device: FmcDevice, ns_name: str) -> None:
@@ -266,19 +273,33 @@ class _Canvas:
         routes.sort(key=lambda route: route.metric)
         seen = set()
         for route in routes:
-            key = (ns_name, route.interface_name.casefold())
+            try:
+                hop = ipaddress.ip_address(route.gateway.split("/", 1)[0].strip())
+            except ValueError:
+                self.notes.append(
+                    f"{ns_name}: default gateway {route.gateway} is not an IP address"
+                )
+                continue
+            key = (ns_name, route.interface_name.casefold(), hop.version)
             if key in seen:
                 continue
             seen.add(key)
-            facing = self.facing.get(key)
+            if hop.is_link_local:
+                self.notes.append(
+                    f"{ns_name}: IPv6 default gateway {route.gateway} on "
+                    f"{route.interface_name} is link-local, which Network Sketcher "
+                    "does not accept, so it is not drawn"
+                )
+                continue
+            facing = self.facing.get(key[:2])
             if facing is None:
                 self.notes.append(
                     f"{ns_name}: default gateway {route.gateway} on {route.interface_name} "
                     "has no matching interface"
                 )
                 continue
-            dummy, port, cidr = facing
-            assigned = gateway_cidr(route.gateway, cidr)
+            dummy, port, cidrs = facing
+            assigned = gateway_cidr(route.gateway, cidrs)
             self.add_ip(dummy, port, assigned)
             self.placements.append(
                 f"{ns_name} default gateway {assigned} -> {dummy} {port}"
@@ -296,14 +317,14 @@ class _Canvas:
                 self.model.port_channels.append(
                     NSPortChannel(drawn.device, list(drawn.ports), drawn.portchannel)
                 )
-                self.add_ip(drawn.device, drawn.portchannel, drawn.ipv4)
+                self.add_ips(drawn.device, drawn.portchannel, drawn.cidrs)
             else:
-                self.add_ip(drawn.device, drawn.ip_port, drawn.ipv4)
-            for parent, subif, vlan, cidr in drawn.subifs:
+                self.add_ips(drawn.device, drawn.ip_port, drawn.cidrs)
+            for parent, subif, vlan, cidrs in drawn.subifs:
                 self.model.subinterfaces.append(
                     NSSubInterface(drawn.device, parent, subif, vlan)
                 )
-                self.add_ip(drawn.device, subif, cidr)
+                self.add_ips(drawn.device, subif, cidrs)
             self.placements.append(
                 f"{drawn.device} {drawn.title} -> failover peer"
             )
@@ -339,11 +360,11 @@ class _Canvas:
                     continue
                 ports = [normalise_port_name(member) for member in iface.members]
                 drawn = _Drawn(
-                    role, ns_name, title, ports, port, iface.ipv4,
+                    role, ns_name, title, ports, port, iface.cidrs,
                     portchannel=port or "Port-channel 1",
                 )
             else:
-                drawn = _Drawn(role, ns_name, title, [port], port, iface.ipv4)
+                drawn = _Drawn(role, ns_name, title, [port], port, iface.cidrs)
             take(role).append(drawn)
             for owned in drawn.ports:
                 by_port[owned.casefold()] = drawn
@@ -363,7 +384,7 @@ class _Canvas:
             existing = by_port.get(parent.casefold())
             role = classify_interface(iface, self.keywords)
             if existing is None:
-                drawn = _Drawn(role, ns_name, iface.ifname or iface.name, [parent], parent, "")
+                drawn = _Drawn(role, ns_name, iface.ifname or iface.name, [parent], parent, [])
                 take(role).append(drawn)
                 by_port[parent.casefold()] = drawn
                 existing = drawn
@@ -374,7 +395,7 @@ class _Canvas:
                     f"{ns_name} {subif}: bound to {bind} because the port-channel "
                     "is created after physical links"
                 )
-            existing.subifs.append((bind, subif, _vlan(iface), iface.ipv4))
+            existing.subifs.append((bind, subif, _vlan(iface), iface.cidrs))
 
         for iface in device.interfaces:
             if iface.kind != "loopback" or not _drawable(iface):
@@ -383,7 +404,7 @@ class _Canvas:
             self.model.virtual_ports.append(
                 NSVirtualPort(ns_name, port, is_loopback=True)
             )
-            self.add_ip(ns_name, port, iface.ipv4)
+            self.add_ips(ns_name, port, iface.cidrs)
         return regular, failover
 
     def place_group(self, group: _Group) -> None:
@@ -444,7 +465,7 @@ class _Canvas:
         dummy_port = self.ethernet(self.dummy_fmc)
         self.link(self.fmc_name, fmc_port, self.dummy_fmc, dummy_port)
         if self.fmc_ipv4:
-            own = self.fmc_ipv4 if "/" in self.fmc_ipv4 else f"{self.fmc_ipv4}/32"
+            own = self.fmc_ipv4 if "/" in self.fmc_ipv4 else gateway_cidr(self.fmc_ipv4, [])
             self.add_ip(self.fmc_name, fmc_port, own)
         if self.fmc_gateway:
             assigned = gateway_cidr(self.fmc_gateway, self.fmc_ipv4)

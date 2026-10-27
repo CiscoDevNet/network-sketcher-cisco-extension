@@ -171,6 +171,69 @@ def vpn_id_of(itf: Dict[str, Any]) -> Optional[int]:
         return None
 
 
+# vManage writes "-" for the address of a family the interface does not run
+# (for example the IPv4 address on an ``af-type: ipv6`` row).
+_NO_ADDRESS = frozenset({"", "0.0.0.0", "-"})
+
+
+def _has_ipv4(itf: Dict[str, Any]) -> bool:
+    ip = str(itf.get("ip-address") or "").strip().split("/", 1)[0]
+    return ip not in _NO_ADDRESS
+
+
+def ipv6_cidrs(itf: Dict[str, Any]) -> List[str]:
+    """Global or unique-local IPv6 ``addr/len`` values of one interface row.
+
+    Reads Viptela-OS ``ipv6-address`` and IOS-XE ``ipv6-addrs`` (a list or a
+    comma/space separated string). Values without a prefix length and
+    link-local, multicast, loopback, unspecified or site-local addresses are
+    skipped.
+    """
+    raw_values: List[Any] = []
+    for key in ("ipv6-address", "ipv6-addrs"):
+        value = itf.get(key)
+        if isinstance(value, list):
+            raw_values.extend(value)
+        elif value is not None:
+            raw_values.extend(re.split(r"[,\s]+", str(value)))
+    found: List[str] = []
+    for value in raw_values:
+        if isinstance(value, dict):
+            value = value.get("address") or value.get("ipv6-address") or ""
+        text = str(value or "").strip()
+        if ":" not in text or "/" not in text:
+            continue
+        try:
+            iface = ipaddress.IPv6Interface(text)
+        except ValueError:
+            continue
+        host = iface.ip
+        if (host.is_link_local or host.is_multicast or host.is_loopback
+                or host.is_unspecified or host.is_site_local):
+            continue
+        if iface.with_prefixlen not in found:
+            found.append(iface.with_prefixlen)
+    return found
+
+
+def ipv6_by_port(interfaces: List[Dict[str, Any]]) -> Dict[Tuple[Optional[int], str], List[str]]:
+    """{(vpn-id, ifname): [IPv6 CIDR, ...]} over every row of one device.
+
+    The IPv6 address of a dual-stack port is often on a separate row from its
+    IPv4 address, so callers look it up by port instead of by row.
+    """
+    out: Dict[Tuple[Optional[int], str], List[str]] = {}
+    for itf in interfaces or []:
+        ifname = str(itf.get("ifname") or itf.get("interface") or "").strip()
+        if not ifname:
+            continue
+        for cidr in ipv6_cidrs(itf):
+            bucket = out.setdefault((vpn_id_of(itf), ifname), [])
+            if cidr not in bucket:
+                bucket.append(cidr)
+    return out
+
+
 def physical_wan_interfaces(interfaces: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """VPN0 physical interfaces carrying a real IPv4 address (Underlay ports).
 
@@ -185,8 +248,7 @@ def physical_wan_interfaces(interfaces: List[Dict[str, Any]]) -> List[Dict[str, 
         ifname = itf.get("ifname") or itf.get("interface") or ""
         if not _is_physical_ifname(ifname):
             continue
-        ip = (itf.get("ip-address") or "").strip()
-        if not ip or ip == "0.0.0.0":
+        if not _has_ipv4(itf):
             continue
         out.append(itf)
     return out
@@ -209,8 +271,7 @@ def tunnel_wan_interfaces(interfaces: List[Dict[str, Any]]) -> List[Dict[str, An
         ifname = itf.get("ifname") or itf.get("interface") or ""
         if not _is_tunnel_ifname(ifname):
             continue
-        ip = (itf.get("ip-address") or "").strip()
-        if not ip or ip == "0.0.0.0":
+        if not _has_ipv4(itf):
             continue
         out.append(itf)
     return out
@@ -251,8 +312,7 @@ def service_vpn_interfaces(
         ifname = itf.get("ifname") or itf.get("interface") or ""
         if not (_is_physical_ifname(ifname) or is_loopback_ifname(ifname)):
             continue
-        ip = (itf.get("ip-address") or "").strip()
-        if not ip or ip == "0.0.0.0":
+        if not _has_ipv4(itf):
             continue
         out.append((vpn_id, itf))
     return out
@@ -546,8 +606,7 @@ def controller_vpn0_interfaces(interfaces: List[Dict[str, Any]]) -> List[Dict[st
             continue
         if _is_tunnel_ifname(ifname) or is_loopback_ifname(ifname):
             continue
-        ip = interface_ip(itf)
-        if not ip or ip == "0.0.0.0":
+        if interface_ip(itf) in _NO_ADDRESS:
             continue
         out.append(itf)
     return out

@@ -62,7 +62,10 @@ def _host_cidr(ip: str) -> str:
     """A host endpoint address as a host CIDR (/32 IPv4, /128 IPv6).
 
     fvCEp/fvIp report bare host IPs with no prefix; /32 (or /128) marks them as
-    host addresses without implying a (possibly wrong) subnet mask."""
+    host addresses without implying a (possibly wrong) subnet mask. An address
+    that already carries a prefix keeps it."""
+    if "/" in ip:
+        return ip
     return f"{ip}/128" if ":" in ip else f"{ip}/32"
 
 # Every device in the overlay is a *logical* construct (EPG / VRF gateway /

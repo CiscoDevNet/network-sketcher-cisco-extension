@@ -25,7 +25,8 @@ Key NS conventions implemented here:
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+import ipaddress
+from dataclasses import dataclass, field
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
 from .ns_model import (
@@ -234,14 +235,70 @@ def cmd_add_l2_segment_bulk(model: NSModel) -> Optional[str]:
 # Phase 4: IP addresses + VRFs
 # ---------------------------------------------------------------------------
 
-def cmd_add_ip_address_bulk(model: NSModel) -> Optional[str]:
-    """Phase 4 step 10: add ip_address_bulk."""
+def ns_ip_cidr(raw: str) -> Tuple[Optional[str], str]:
+    """Return ``(cidr, reason)`` for one address. IPv4 passes through unchanged.
+
+    Network Sketcher rejects IPv6 without a prefix length, with a zone index,
+    or of the link-local, multicast, loopback, unspecified, IPv4-mapped or
+    site-local kinds; those return ``(None, reason)``. Accepted IPv6 is
+    written in lower-case compressed form.
+    """
+    text = (raw or "").strip()
+    if ":" not in text:
+        return raw, ""
+    if "%" in text:
+        return None, "zone index"
+    if "/" not in text:
+        return None, "no prefix length"
+    try:
+        iface = ipaddress.IPv6Interface(text)
+    except ValueError:
+        return None, "invalid IPv6"
+    addr = iface.ip
+    if addr.is_link_local:
+        return None, "link-local"
+    if addr.is_multicast:
+        return None, "multicast"
+    if addr.is_loopback:
+        return None, "loopback"
+    if addr.is_unspecified:
+        return None, "unspecified"
+    if addr.ipv4_mapped is not None:
+        return None, "IPv4-mapped"
+    if addr.is_site_local:
+        return None, "site-local"
+    return iface.with_prefixlen, ""
+
+
+def cmd_add_ip_address_bulk(
+    model: NSModel, dropped: Optional[List[Tuple[str, str, str, str]]] = None,
+) -> Optional[str]:
+    """Phase 4 step 10: add ip_address_bulk.
+
+    Addresses ``ns_ip_cidr`` rejects are left out and appended to ``dropped``
+    as ``(device, port, address, reason)``. A row whose every address is left
+    out is not written.
+    """
     if not model.ip_assignments:
         return None
     rows: List[str] = []
     for ip in model.ip_assignments:
-        cidrs = _q_list(ip.cidrs)
+        kept: List[str] = []
+        for raw in ip.cidrs:
+            cidr, reason = ns_ip_cidr(raw)
+            if cidr is None:
+                if dropped is not None:
+                    dropped.append((ip.device, ip.port, raw, reason))
+                continue
+            if ":" in cidr and cidr in kept:
+                continue
+            kept.append(cidr)
+        if ip.cidrs and not kept:
+            continue
+        cidrs = _q_list(kept)
         rows.append(f"['{ip.device}','{ip.port}',{cidrs}]")
+    if not rows:
+        return None
     payload = "[" + ",".join(rows) + "]"
     return f"add ip_address_bulk \"{payload}\""
 
@@ -315,6 +372,7 @@ def cmd_rename_attribute_bulk(model: NSModel) -> str:
 class CommandScript:
     lines: List[str]
     counts: Dict[str, int]
+    dropped_ips: List[Tuple[str, str, str, str]] = field(default_factory=list)
 
     def text(self) -> str:
         return "\n".join(self.lines) + "\n"
@@ -358,10 +416,11 @@ def build_command_script(model: NSModel, port_info_unknown: bool = False) -> Com
     _add("3 l2_segment_bulk", cmd_add_l2_segment_bulk(model))
 
     # Phase 4
-    _add("4 ip_address_bulk", cmd_add_ip_address_bulk(model))
+    dropped_ips: List[Tuple[str, str, str, str]] = []
+    _add("4 ip_address_bulk", cmd_add_ip_address_bulk(model, dropped_ips))
     _add_many("4 l3_instance (VRF)", cmd_rename_l3_instance(model))
 
     # Phase 6
     _add("6 attribute_bulk", cmd_rename_attribute_bulk(model))
 
-    return CommandScript(lines=lines, counts=counts)
+    return CommandScript(lines=lines, counts=counts, dropped_ips=dropped_ips)

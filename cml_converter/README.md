@@ -13,7 +13,10 @@ labs from a CML controller first.
 > from the running-configs. IOS-XR running-configs (`ipv4 address`, `bundle id`,
 > `MgmtEth`, per-interface `vrf`) are parsed to the same L2/L3 facts as
 > `config_converter`; LAG names stay `Bundle-Ether N` (not rewritten to
-> `Port-channel N`).
+> `Port-channel N`). Interface `ipv6 address <addr>/<len>` lines are drawn next
+> to the IPv4 address (dual stack); link-local, EUI-64, `autoconfig` and `dhcp`
+> lines are skipped, and IPv6 Network Sketcher rejects is listed in
+> `parse_report.md`.
 
 <img alt="CML lab converted into a Network Sketcher L1 diagram" src="https://github.com/user-attachments/assets/3fc59bf2-0ec9-43d1-986d-24dd63734c9c" />
 

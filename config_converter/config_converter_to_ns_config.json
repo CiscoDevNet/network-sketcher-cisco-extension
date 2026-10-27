@@ -1,8 +1,8 @@
 {
     "version": {
-        "value": 0.5.1,
+        "value": "0.5.1",
         "description": "config_converter config schema version.",
-        "sample": 0.5.1
+        "sample": "0.5.1"
     },
     "recursive_scan": {
         "value": false,
@@ -23,6 +23,11 @@
         "value": 24,
         "description": "A subnet whose prefix length is <= this value (e.g. /24, /23, /22 with the default 24) is considered 'large' for the purposes of l2_inference_enabled, since it has far more free addresses than a typical /30-/29 point-to-point link and therefore likely has a real L2 switch behind it (DESIGN.md 4.3.3).",
         "sample": 23
+    },
+    "large_subnet_prefix_threshold_v6": {
+        "value": 64,
+        "description": "IPv6 counterpart of large_subnet_prefix_threshold. An IPv6 subnet whose prefix length is <= this value (a /64 LAN with the default 64) is treated as a shared LAN segment; a /127 point-to-point link stays a direct link. IPv6 subnets are matched only on interfaces that have no IPv4 address to match on.",
+        "sample": 64
     },
     "matching_algorithm": {
         "value": "blossom",

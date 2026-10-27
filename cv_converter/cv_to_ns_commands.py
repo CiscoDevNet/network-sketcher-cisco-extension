@@ -602,7 +602,8 @@ def convert(nodes_path: Optional[str], acts_path: Optional[str], out_dir: str, c
             out_of_scope.append((a.name, a.ip, f"noise group '{grp or '(empty)'}'"))
             continue
         if not is_real_ip(a.ip):
-            out_of_scope.append((a.name, a.ip, "no routable IPv4"))
+            reason = "IPv6 asset (not drawn)" if ":" in (a.ip or "") else "no routable IPv4"
+            out_of_scope.append((a.name, a.ip, reason))
             continue
         live[key] = a
 

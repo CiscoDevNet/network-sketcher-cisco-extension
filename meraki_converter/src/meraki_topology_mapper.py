@@ -286,12 +286,14 @@ def build_model(
                     counts["ip_assignments"] += 1
             # WAN static IP -> L3 on the gateway WAN port.
             ip, mask = wan1.get("staticIp"), wan1.get("staticSubnetMask")
-            if ip and mask:
-                pfx = _mask_to_prefix(mask)
-                cidr = f"{ip}/{pfx}" if pfx is not None else ip
-                model.ip_assignments.append(NSIPAssignment(gw_name, _MX_WAN_PORT, [cidr]))
+            # Network Sketcher needs a prefix length, so an address whose mask
+            # is unknown is not written.
+            pfx = _mask_to_prefix(mask) if ip and mask else None
+            if ip and pfx is not None:
+                model.ip_assignments.append(
+                    NSIPAssignment(gw_name, _MX_WAN_PORT, [f"{ip}/{pfx}"]))
                 counts["ip_assignments"] += 1
-            elif gw.wan1_ip:
+            elif gw.wan1_ip and "/" in str(gw.wan1_ip):
                 model.ip_assignments.append(NSIPAssignment(gw_name, _MX_WAN_PORT, [gw.wan1_ip]))
                 counts["ip_assignments"] += 1
             # LAN-side L3 — the default gateway for the LAN, without which there
@@ -383,8 +385,13 @@ def build_model(
                     gw_lan = normalise_port_name("GigabitEthernet 0/9")
                     model.l1_links.append(NSL1Link(name_of[parent.serial], gw_lan, cname, _AP_UPLINK_PORT))
                 counts["l1_links"] += 1
-                if ip:
-                    model.ip_assignments.append(NSIPAssignment(cname, _AP_UPLINK_PORT, [f"{ip}/24"]))
+                client_cidrs = [f"{ip}/24"] if ip else []
+                ip6 = str(cl.get("ip6") or "").strip()
+                if ip6:
+                    client_cidrs.append(ip6 if "/" in ip6 else f"{ip6}/128")
+                if client_cidrs:
+                    model.ip_assignments.append(
+                        NSIPAssignment(cname, _AP_UPLINK_PORT, client_cidrs))
                     counts["ip_assignments"] += 1
                 counts["clients"] += 1
 
@@ -497,6 +504,43 @@ def _subnet_prefix(subnet: str, default: str = "24") -> str:
     return default
 
 
+def _appliance_ipv6_cidrs(ipv6: Any) -> List[str]:
+    """Static appliance IPv6 addresses from a VLAN or single-LAN ``ipv6`` block.
+
+    Only prefix assignments with a static prefix and a static appliance
+    address are drawn. A prefix delegated from the WAN is resolved by the MX
+    at run time and is not in the export.
+    """
+    if not isinstance(ipv6, dict) or not ipv6.get("enabled"):
+        return []
+    out: List[str] = []
+    for pa in ipv6.get("prefixAssignments") or []:
+        if not isinstance(pa, dict) or pa.get("autonomous"):
+            continue
+        ip6 = str(pa.get("staticApplianceIp6") or "").strip()
+        prefix = str(pa.get("staticPrefix") or "").strip()
+        if not ip6 or "/" not in prefix:
+            continue
+        cidr = f"{ip6}/{prefix.rsplit('/', 1)[-1]}"
+        if cidr not in out:
+            out.append(cidr)
+    return out
+
+
+def _switch_ipv6_cidr(ri: Dict[str, Any]) -> Optional[str]:
+    """A switch SVI's static IPv6 ``address/len``, or None (EUI-64 or absent)."""
+    v6 = ri.get("ipv6")
+    if not isinstance(v6, dict):
+        return None
+    if str(v6.get("assignmentMode") or "static").strip().lower() != "static":
+        return None
+    addr = str(v6.get("address") or "").strip()
+    prefix = str(v6.get("prefix") or "").strip()
+    if not addr or "/" not in prefix:
+        return None
+    return f"{addr}/{prefix.rsplit('/', 1)[-1]}"
+
+
 def _add_appliance_l3(model: NSModel, gw_name: str, lan_port: str,
                       detail: Dict[str, Any], counts: Dict[str, int]) -> bool:
     """Add the MX LAN-side L3 interface(s) so LAN hosts have a default gateway.
@@ -518,9 +562,10 @@ def _add_appliance_l3(model: NSModel, gw_name: str, lan_port: str,
             model.virtual_ports.append(NSVirtualPort(gw_name, svi, vlan_id=int(vid)))
             model.l2_segments_svi.append(NSL2Segment(gw_name, svi, [f"Vlan{vid}"]))
             ip, subnet = v.get("applianceIp"), v.get("subnet")
-            if ip and subnet:
-                model.ip_assignments.append(
-                    NSIPAssignment(gw_name, svi, [f"{ip}/{_subnet_prefix(subnet)}"]))
+            cidrs = [f"{ip}/{_subnet_prefix(subnet)}"] if ip and subnet else []
+            cidrs += _appliance_ipv6_cidrs(v.get("ipv6"))
+            if cidrs:
+                model.ip_assignments.append(NSIPAssignment(gw_name, svi, cidrs))
                 counts["ip_assignments"] += 1
             trunk_vlans.append(f"Vlan{vid}")
         if trunk_vlans:
@@ -540,7 +585,8 @@ def _add_appliance_l3(model: NSModel, gw_name: str, lan_port: str,
         cidr = f"{ip}/{_subnet_prefix(single.get('subnet', ''))}"
         model.virtual_ports.append(NSVirtualPort(gw_name, svi, vlan_id=vid))
         model.l2_segments_svi.append(NSL2Segment(gw_name, svi, [f"Vlan{vid}"]))
-        model.ip_assignments.append(NSIPAssignment(gw_name, svi, [cidr]))
+        model.ip_assignments.append(
+            NSIPAssignment(gw_name, svi, [cidr] + _appliance_ipv6_cidrs(single.get("ipv6"))))
         counts["ip_assignments"] += 1
         model.l2_segments_phys.append(NSL2Segment(gw_name, lan_port, [f"Vlan{vid}"]))
         counts["l2_segments"] += 1
@@ -619,9 +665,12 @@ def _add_switch_l3(model: NSModel, sw_name: str,
         model.virtual_ports.append(NSVirtualPort(sw_name, svi, vlan_id=int(vid)))
         model.l2_segments_svi.append(NSL2Segment(sw_name, svi, [f"Vlan{int(vid)}"]))
         ip, subnet = ri.get("interfaceIp"), ri.get("subnet")
-        if ip and subnet:
-            model.ip_assignments.append(
-                NSIPAssignment(sw_name, svi, [f"{ip}/{_subnet_prefix(subnet)}"]))
+        cidrs = [f"{ip}/{_subnet_prefix(subnet)}"] if ip and subnet else []
+        ip6 = _switch_ipv6_cidr(ri)
+        if ip6:
+            cidrs.append(ip6)
+        if cidrs:
+            model.ip_assignments.append(NSIPAssignment(sw_name, svi, cidrs))
             counts["ip_assignments"] += 1
         vrf = ri.get("vrfName")
         if not vrf and isinstance(ri.get("vrf"), dict):

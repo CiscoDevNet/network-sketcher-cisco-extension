@@ -117,6 +117,16 @@ class IPv4Addr:
 
 
 @dataclass
+class IPv6Addr:
+    address: str  # lower-case compressed, no prefix
+    prefix: int
+
+    @property
+    def cidr(self) -> str:
+        return f"{self.address}/{self.prefix}"
+
+
+@dataclass
 class VirtualIPv4:
     """A first-hop-redundancy-protocol virtual/group address (HSRP/VRRP/GLBP).
 
@@ -180,6 +190,7 @@ class ParsedInterface:
     trunk_allowed_vlans: List[int] = field(default_factory=list)
     ipv4: List[IPv4Addr] = field(default_factory=list)
     ipv4_secondary: List[IPv4Addr] = field(default_factory=list)
+    ipv6: List[IPv6Addr] = field(default_factory=list)
     ipv4_dhcp: bool = False            # 'ip address dhcp' / 'negotiated' — WAN signal (DESIGN.md 4.8)
     virtual_ips: List[VirtualIPv4] = field(default_factory=list)  # HSRP/VRRP/GLBP (DESIGN.md 4.3)
     vrf: Optional[str] = None
@@ -212,6 +223,14 @@ class ParsedInterface:
     # therefore only ever reflects a genuine, enforced rate-limiting signal.
     nameif: Optional[str] = None       # ASA/FTD/FDM zone name (DESIGN.md 4.2.1) — 'nameif outside' is a strong WAN signal (DESIGN.md 4.8)
 
+    def has_ip(self) -> bool:
+        """True when the interface has any IPv4 or IPv6 address."""
+        return bool(self.ipv4 or self.ipv6)
+
+    def all_cidrs(self) -> List[str]:
+        """IPv4 primary, IPv4 secondary, then IPv6, in config order."""
+        return [a.cidr for a in list(self.ipv4) + list(self.ipv4_secondary) + list(self.ipv6)]
+
     def is_routed(self) -> bool:
         """Ported from cml_converter/src/config_parser.py."""
         if self.kind in {"svi", "loopback", "mgmt", "tunnel"}:
@@ -219,8 +238,8 @@ class ParsedInterface:
         if self.kind in {"subif"}:
             return True
         if self.kind in {"portchannel", "physical"}:
-            return self.no_switchport_seen or bool(self.ipv4)
-        return bool(self.ipv4)
+            return self.no_switchport_seen or self.has_ip()
+        return self.has_ip()
 
 
 @dataclass
@@ -319,6 +338,23 @@ def _parse_ip_cidr(s: str) -> Optional[IPv4Addr]:
         except (ipaddress.AddressValueError, ValueError):
             return None
     return None
+
+
+def _parse_ipv6_cidr(s: str) -> Optional[IPv6Addr]:
+    """The leading ``addr/len`` of an ``ipv6 address`` line, or None.
+
+    Trailing tokens such as ASA ``standby <addr>`` are ignored. A general
+    prefix name (``ipv6 address PREFIX ::1/64``) is not resolved.
+    """
+    words = s.split()
+    token = words[0] if words else ""
+    if ":" not in token or "/" not in token:
+        return None
+    try:
+        iface = ipaddress.IPv6Interface(token)
+    except ValueError:
+        return None
+    return IPv6Addr(address=iface.ip.compressed, prefix=iface.network.prefixlen)
 
 
 def _expand_vlan_list(s: str) -> List[int]:
@@ -682,6 +718,17 @@ def _consume_iface_line(stripped: str, iface: ParsedInterface, policy_bandwidth_
     # Phase 1c: IOS-XR uses "ipv4 address ..." instead of "ip address ...".
     if re.match(r"^(?:ip|ipv4)\s+address\s+(?:dhcp|negotiated)\s*$", stripped, re.IGNORECASE):
         iface.ipv4_dhcp = True
+        return True
+
+    # IPv6 interface address. Link-local, EUI-64, SLAAC and DHCPv6 forms carry
+    # no address Network Sketcher can draw, so they are consumed and dropped.
+    m = re.match(r"^ipv6\s+address\s+(.+)$", stripped, re.IGNORECASE)
+    if m:
+        words = set(m.group(1).lower().split())
+        if not words & {"link-local", "eui-64", "autoconfig", "dhcp"}:
+            addr6 = _parse_ipv6_cidr(m.group(1))
+            if addr6 and all(a.cidr != addr6.cidr for a in iface.ipv6):
+                iface.ipv6.append(addr6)
         return True
 
     m = re.match(r"^(?:ip|ipv4)\s+address\s+(.+?)(?:\s+secondary)?$", stripped, re.IGNORECASE)

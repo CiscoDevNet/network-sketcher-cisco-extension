@@ -996,14 +996,14 @@ def apply_parsed_configs(
             ns_port = normalise_port_name(iname)
 
             if iface.kind == "svi":
-                if not is_endpoint and iface.ipv4:
+                if not is_endpoint and iface.has_ip():
                     vid = _extract_vlan_id(iname)
                     model.virtual_ports.append(NSVirtualPort(
                         device=label, port=ns_port, vlan_id=vid,
                     ))
                     model.ip_assignments.append(NSIPAssignment(
                         device=label, port=ns_port,
-                        cidrs=[a.cidr for a in iface.ipv4 + iface.ipv4_secondary],
+                        cidrs=iface.all_cidrs(),
                     ))
                     if vid is not None:
                         model.l2_segments_svi.append(NSL2Segment(
@@ -1015,13 +1015,13 @@ def apply_parsed_configs(
                     st["svi"] += 1
 
             elif iface.kind == "loopback":
-                if iface.ipv4:
+                if iface.has_ip():
                     model.virtual_ports.append(NSVirtualPort(
                         device=label, port=ns_port, is_loopback=True,
                     ))
                     model.ip_assignments.append(NSIPAssignment(
                         device=label, port=ns_port,
-                        cidrs=[a.cidr for a in iface.ipv4 + iface.ipv4_secondary],
+                        cidrs=iface.all_cidrs(),
                     ))
                     if iface.vrf:
                         model.vrf_renames.append((label, ns_port, iface.vrf))
@@ -1032,10 +1032,10 @@ def apply_parsed_configs(
                 po_id_match = re.search(r"(\d+)$", iname)
                 if po_id_match is not None:
                     po_logical_names[int(po_id_match.group(1))] = ns_port
-                if iface.ipv4:
+                if iface.has_ip():
                     model.ip_assignments.append(NSIPAssignment(
                         device=label, port=ns_port,
-                        cidrs=[a.cidr for a in iface.ipv4 + iface.ipv4_secondary],
+                        cidrs=iface.all_cidrs(),
                     ))
                     st["l3_phys"] += 1
                 if not is_endpoint and (iface.trunk_allowed_vlans or iface.trunk_native_vlan is not None):
@@ -1070,19 +1070,19 @@ def apply_parsed_configs(
                         device=label, parent_port=parent_port,
                         subif_port=ns_port, vlan_id=iface.access_vlan,
                     ))
-                    if iface.ipv4:
+                    if iface.has_ip():
                         model.ip_assignments.append(NSIPAssignment(
                             device=label, port=ns_port,
-                            cidrs=[a.cidr for a in iface.ipv4 + iface.ipv4_secondary],
+                            cidrs=iface.all_cidrs(),
                         ))
                         if iface.vrf:
                             model.vrf_renames.append((label, ns_port, iface.vrf))
                         st["l3_phys"] += 1
                     continue
-                if iface.is_routed() and iface.ipv4:
+                if iface.is_routed() and iface.has_ip():
                     model.ip_assignments.append(NSIPAssignment(
                         device=label, port=ns_port,
-                        cidrs=[a.cidr for a in iface.ipv4 + iface.ipv4_secondary],
+                        cidrs=iface.all_cidrs(),
                     ))
                     if iface.vrf:
                         model.vrf_renames.append((label, ns_port, iface.vrf))
@@ -1090,10 +1090,10 @@ def apply_parsed_configs(
                 else:
                     if is_endpoint:
                         # Endpoint side: do nothing here; IP (if any) is direct (RULE 11.5).
-                        if iface.ipv4:
+                        if iface.has_ip():
                             model.ip_assignments.append(NSIPAssignment(
                                 device=label, port=ns_port,
-                                cidrs=[a.cidr for a in iface.ipv4],
+                                cidrs=[a.cidr for a in list(iface.ipv4) + list(iface.ipv6)],
                             ))
                             st["l3_phys"] += 1
                     else:
@@ -1115,10 +1115,10 @@ def apply_parsed_configs(
             elif iface.kind == "mgmt":
                 # Mgmt interfaces are usually in 'management' VRF — record as
                 # L3 physical with VRF tag (NS represents it as L3 on the port).
-                if iface.ipv4:
+                if iface.has_ip():
                     model.ip_assignments.append(NSIPAssignment(
                         device=label, port=ns_port,
-                        cidrs=[a.cidr for a in iface.ipv4 + iface.ipv4_secondary],
+                        cidrs=iface.all_cidrs(),
                     ))
                     if iface.vrf:
                         model.vrf_renames.append((label, ns_port, iface.vrf))

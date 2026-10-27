@@ -111,9 +111,9 @@ Steps 2 and 3 are **independent**: fetch once, convert as many times as you like
 | **Fabric** | an **area** (one per fabric) |
 | **VRF** (`vrfName`, L3VNI `vrfId`) | a synthesised **gateway device** `VRF-GW:<fabric>-<vrf>` + an `l3_instance` (VRF) tag on its SVIs |
 | **Network** (`networkName`, L2VNI `networkId`) | **one shared L2 segment** (`Vlan <id>`) **and** an NS device `NET:<network>` bound to it (the L2VNI / EPG-equivalent) |
-| **Network gateway** (`gatewayIpAddress` / v6) | an **SVI** `Vlan <id>` on the VRF gateway + the subnet IP + `l3_instance` = VRF (the distributed anycast gateway) |
+| **Network gateway** (`gatewayIpAddress` / `gatewayIpV6Address`) | an **SVI** `Vlan <id>` on the VRF gateway + the subnet IPs (IPv4 and every IPv6 in the comma-separated list) + `l3_instance` = VRF (the distributed anycast gateway) |
 | **L2-only Network** (no VRF) | a floating `NET:<network>` segment device (no gateway/SVI) |
-| **Endpoint Locator host** (optional) | a host device `EP_<network>_<n>` under its Network (host side = L3 IP /32·/128, network side = BD VLAN) |
+| **Endpoint Locator host** (optional) | a host device `EP_<network>_<n>` under its Network (host side = L3 IP /32·/128, network side = BD VLAN). IPv6 Network Sketcher rejects, such as link-local, is left out and listed in the overlay report |
 
 > [!TIP]
 > Every overlay device name starts with a **type prefix** — `VRF-GW:`, `NET:`,

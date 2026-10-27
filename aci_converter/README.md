@@ -190,6 +190,9 @@ not label endpoints natively). Then:
 
 The endpoint sits in the BD broadcast domain the real way: the **host side is an
 L3 port (IP)**, and the **EPG (switch) side of that link carries the BD VLAN**.
+IPv6 endpoints and BD subnets are included. Link-local (`fe80::/10`) and other
+IPv6 kinds Network Sketcher does not accept are left out and listed in the
+overlay report.
 MAC / encap / vPC / attach-location are recorded in each device's Attribute-D.
 
 ### 5. Contracts are flows, not links

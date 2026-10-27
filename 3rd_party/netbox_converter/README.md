@@ -195,7 +195,8 @@ Outputs (in the `--out` directory):
 | L1 links (cables / pass-through) | ✅ | via `connected_endpoints`; port de-duplicated |
 | Port-channels (LAG) | ✅ | from interface `lag` membership |
 | SVIs / loopbacks | ✅ | `virtual` interfaces (`VlanN` / `LoopbackN`) |
-| Interface IPs + VRF | ✅ | on cabled ports / SVIs of placed devices |
+| Interface IPs + VRF | ✅ | on cabled ports / SVIs of placed devices; IPv4 and IPv6 (dual stack) |
+| IPv6 that Network Sketcher rejects | ➖ left out | link-local, multicast, loopback, unspecified, IPv4-mapped and site-local are listed in `netbox_report.md` |
 | WAN / circuits | ✅ (opt) | drawn as a light-blue *observed* cloud WayPoint (`draw_wan_waypoints`) |
 | Access/trunk VLANs on **uncabled** ports | ✅ (opt) | a `dummy_stub_N` peer is synthesized so the port exists (`synthesize_host_stubs`); disable to skip + report instead |
 | IPs on **uncabled/absent** ports | ✅ (opt) | same `dummy_stub_N` mechanism |

@@ -360,7 +360,9 @@ def _write_parse_report(
     if skipped_ports:
         lines += [
             "",
-            "## Skipped ports (no L1 link in the CML lab)\n",
+            "## Skipped ports (no L1 link in the CML lab)\n"
+            if not any(what.startswith("IPv6 ") for _d, _p, what in skipped_ports)
+            else "## Skipped ports (no L1 link in the CML lab, or IPv6 Network Sketcher rejects)\n",
             "| Device | Port | Not emitted |",
             "|--------|------|-------------|",
         ]
@@ -505,7 +507,14 @@ def main(argv: Optional[list] = None) -> int:
     # Step 6: parse report
     # ------------------------------------------------------------------
     print("[6/6] Writing parse report …")
-    _write_parse_report(out_dir, parse_stats, nodes, parsed_configs, model.skipped_ports)
+    skipped = list(model.skipped_ports) + [
+        (device, port, f"IPv6 {addr} ({reason})")
+        for device, port, addr, reason in script.dropped_ips
+    ]
+    if script.dropped_ips:
+        print(f"  [WARN] {len(script.dropped_ips)} IPv6 address(es) left out because "
+              f"Network Sketcher does not accept them. See parse_report.md.")
+    _write_parse_report(out_dir, parse_stats, nodes, parsed_configs, skipped)
 
     print("\n[Done] All outputs written.")
     return 0
