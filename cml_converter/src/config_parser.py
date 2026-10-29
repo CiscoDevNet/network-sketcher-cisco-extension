@@ -418,7 +418,7 @@ def _consume_iface_line(stripped: str, iface: ParsedInterface) -> bool:
         iface.access_vlan = int(m.group(1))  # used to derive l2_segment binding for sub-if
         return True
 
-    m = re.match(r"^vrf\s+(?:member|forwarding)\s+(\S+)$", stripped)
+    m = re.match(r"^(?:ip\s+)?vrf\s+(?:member|forwarding)\s+(\S+)$", stripped)
     if m:
         iface.vrf = m.group(1)
         return True
@@ -507,13 +507,15 @@ def _consume_iface_line(stripped: str, iface: ParsedInterface) -> bool:
 # flattened to column 0 (common in some IOL/CSR dumps) still parse correctly.
 # Only UNAMBIGUOUSLY top-level keywords belong here. Notably we must NOT list
 # bare ``vrf`` (the interface child ``vrf forwarding|member <x>`` would falsely
-# terminate the block before its ``ip address``), nor ``spanning-tree`` /
+# terminate the block before its ``ip address``) -- and for the same reason
+# ``ip vrf`` stops short of the classic child ``ip vrf forwarding <x>`` --
+# nor ``spanning-tree`` /
 # ``monitor`` (both also appear as interface child lines). Interface stanzas are
 # primarily delimited by the ``!`` separator / blank line; these keywords are a
 # secondary safety net.
 _SECTION_BOUNDARY_RE = re.compile(
     r"^(?:interface\b|router\b|line\b|vlan\b|"
-    r"vrf\s+(?:context|definition)\b|ip\s+vrf\b|hostname\b|"
+    r"vrf\s+(?:context|definition)\b|ip\s+vrf\s+(?!forwarding\b)|hostname\b|"
     r"control-plane\b|route-map\b|policy-map\b|class-map\b|"
     r"ip\s+access-list\b|crypto\b|banner\b|boot\b|aaa\b|"
     r"snmp-server\b|ntp\b|end\s*$)",

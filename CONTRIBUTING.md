@@ -23,7 +23,7 @@ possible, and, if possible, a test case. For this project it is especially helpf
 2. Expected vs. actual behaviour
 3. Your OS, Python version, and dependency versions (`pip list`)
 4. The tool and input format you used, and the relevant report
-   (`parse_report.md` for `cml_converter`; `aci_underlay_report.md` / `aci_overlay_report.md` for `aci_converter`)
+   (`parse_report.md` / `overlay_report.md` for `cml_converter`; `aci_underlay_report.md` / `aci_overlay_report.md` for `aci_converter`)
 
 **If you discover a security bug, please do not report it through GitHub. Instead, please see security procedures in
 [SECURITY.md](/SECURITY.md).**

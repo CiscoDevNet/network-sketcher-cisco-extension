@@ -42,6 +42,8 @@ python -m aci_converter.src.convert \
 
 # cml_converter — convert a CML lab YAML (+ embedded running-configs) into NS commands
 python -m cml_converter.src.convert --yaml /path/to/your_lab.yaml --out /tmp/ns_commands.txt
+#   --mode overlay|both adds the integrated EVPN / SD-WAN / L3VPN overlay (ns_commands_cml_overlay.txt)
+python -m cml_converter.src.convert --yaml /path/to/your_lab.yaml --out /tmp/ns_commands.txt --mode both
 
 # config_converter — reconstruct L1/L2/L3 from Cisco running-config text files
 python -m config_converter.src.convert \

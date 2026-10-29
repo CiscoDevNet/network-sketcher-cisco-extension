@@ -13,15 +13,22 @@ resolve)::
     python -m cml_converter.src.convert \\
         --yaml  <cml_topology.yaml>         \\
         [--configs <running_configs_dir/>]   \\
-        [--out   ns_commands.txt]
+        [--out   ns_commands.txt]            \\
+        [--mode  underlay|overlay|both]      \\
+        [--overlay auto|evpn|sdwan|l3vpn ...]
 
 Outputs (written to the same directory as ``--out`` unless ``--out`` is an
 absolute path):
 
-- ``ns_commands.txt``       – NS ``run_commands`` input (Phase 1-6)
+- ``ns_commands.txt``       – NS ``run_commands`` input (Phase 1-6, underlay)
 - ``ns_model.json``         – intermediate topology model (debug)
 - ``stencil_mapping.csv``   – stencil type mapping table (audit)
 - ``parse_report.md``       – per-device config coverage statistics
+- ``<stem>_cml_overlay.txt`` / ``ns_model_overlay.json`` / ``overlay_report.md``
+  – the integrated overlay (VXLAN EVPN + SD-WAN + L3VPN), ``--mode overlay|both``
+
+``--mode overlay`` exits with code 3 when no overlay (or none of the
+``--overlay`` types) is found in the node configs.
 
 ``fetch_from_cml.py`` can pull labs over the read-only REST API into a local
 JSON file. Conversion itself still reads only that file. A multi-lab JSON
@@ -48,6 +55,10 @@ from .stencil_mapper import map_all, to_csv_rows
 from .config_parser import parse_all
 from .topology_mapper import _pick_area, build_ns_model, model_to_dict
 from .ns_command_builder import build_command_script
+from .overlay_parser import OVERLAY_TITLES
+from .overlay_stitch import build_overlay_model, write_overlay_report
+
+EXIT_NO_OVERLAY = 3
 
 
 # ---------------------------------------------------------------------------
@@ -419,6 +430,79 @@ def _write_parse_report(
 
 
 # ---------------------------------------------------------------------------
+# Overlay
+# ---------------------------------------------------------------------------
+
+def _default_lab_name(raw_data: Any, yaml_path: pathlib.Path) -> str:
+    """Area name for a single-lab YAML: its title, else the file stem."""
+    lab = raw_data.get("lab") if isinstance(raw_data, dict) else None
+    title = lab.get("title") if isinstance(lab, dict) else None
+    if not title and isinstance(raw_data, dict):
+        title = raw_data.get("lab_title") or raw_data.get("title")
+    return sanitize_lab_area(str(title or yaml_path.stem))
+
+
+def _write_overlay(
+    args: argparse.Namespace,
+    raw_data: Any,
+    yaml_path: pathlib.Path,
+    out_path: pathlib.Path,
+    nodes: List[Dict[str, Any]],
+    underlay: Any,
+    stencil_map: Dict[str, Any],
+    raw_configs: Dict[str, str],
+    parsed_configs: Dict[str, Any],
+    not_extracted: List[str],
+) -> int:
+    """Write the integrated overlay; 0, or EXIT_NO_OVERLAY when none is found."""
+    out_dir = out_path.parent
+    print("[4b] Building integrated overlay …")
+    wanted = args.overlay or ["auto"]
+    result = build_overlay_model(
+        nodes, underlay.l1_links, stencil_map, raw_configs, parsed_configs,
+        default_lab=_default_lab_name(raw_data, yaml_path), wanted=wanted,
+    )
+    explicit = [t for t in wanted if t != "auto"]
+    missing = [t for t in explicit if t not in result.found]
+    found_text = ", ".join(OVERLAY_TITLES[t] for t in result.found) or "none"
+    problem = ""
+    if not result.found:
+        problem = ("No overlay configuration (VXLAN EVPN / SD-WAN / L3VPN) was found "
+                   "in the node configs.")
+    elif missing:
+        problem = (f"Requested overlay type(s) not found in the node configs: "
+                   f"{', '.join(OVERLAY_TITLES[t] for t in missing)} (found: {found_text}).")
+    if problem:
+        level = "[WARN]" if args.mode == "both" else "[ERROR]"
+        print(f"{level} {problem}", file=sys.stderr)
+        if not_extracted:
+            print(f"        {len(not_extracted)} node(s) still have CML's day-0 config: "
+                  f"{', '.join(not_extracted)}", file=sys.stderr)
+            print("        Run 'Extract Configs' in CML (or fetch the lab after it has booted) "
+                  "and convert again.", file=sys.stderr)
+        if args.mode == "both":
+            print("        The underlay is written; the overlay is skipped.", file=sys.stderr)
+        return EXIT_NO_OVERLAY
+
+    script = build_command_script(result.model, port_info_unknown=True)
+    overlay_path = out_dir / f"{out_path.stem}_cml_overlay.txt"
+    overlay_path.write_text(script.text(), encoding="utf-8")
+    (out_dir / "ns_model_overlay.json").write_text(
+        json.dumps(model_to_dict(result.model), indent=2, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    write_overlay_report(out_dir / "overlay_report.md", result, not_extracted)
+    print(f"  overlay found    : {found_text}")
+    print(f"  {overlay_path.name} → {overlay_path}")
+    print(f"  ns_model_overlay.json / overlay_report.md → {out_dir}")
+    print(f"         {len(result.model.devices)} device(s), {len(result.model.l1_links)} link(s), "
+          f"{len(result.canvas.handoffs)} handoff(s), {sum(script.counts.values())} command(s)")
+    if result.canvas.notes:
+        print(f"  [WARN] {len(result.canvas.notes)} overlay note(s). See overlay_report.md.")
+    return 0
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -458,7 +542,26 @@ def main(argv: Optional[list] = None) -> int:
              "'tier' uses the role-based hierarchy (WAN→Border→Spine→…→Endpoint); "
              "'auto' (default) uses coordinates when present, else tier.",
     )
+    parser.add_argument(
+        "--mode", "-m",
+        choices=["underlay", "overlay", "both"],
+        default="underlay",
+        help="'underlay' (default) writes the physical L1/L2/L3 script as before; "
+             "'overlay' writes one integrated overlay script (VXLAN EVPN, SD-WAN, "
+             "L3VPN found in the configs); 'both' writes the two.",
+    )
+    parser.add_argument(
+        "--overlay",
+        choices=["auto", "evpn", "sdwan", "l3vpn"],
+        action="append",
+        default=None,
+        metavar="TYPE",
+        help="Overlay types to draw (repeatable): auto (default, every type found), "
+             "evpn, sdwan, l3vpn.",
+    )
     args = parser.parse_args(argv)
+    write_underlay = args.mode in ("underlay", "both")
+    write_overlay = args.mode in ("overlay", "both")
 
     yaml_path = pathlib.Path(args.yaml).resolve()
     configs_dir = pathlib.Path(args.configs).resolve() if args.configs else None
@@ -532,6 +635,17 @@ def main(argv: Optional[list] = None) -> int:
     # ------------------------------------------------------------------
     print("[4/6] Building NS topology model …")
     model, parse_stats = build_ns_model(nodes, links, stencil_map, parsed_configs, layout=args.layout)
+
+    if write_overlay:
+        overlay_rc = _write_overlay(
+            args, raw_data, yaml_path, out_path, nodes, model, stencil_map,
+            raw_configs, parsed_configs, not_extracted,
+        )
+        if overlay_rc and not write_underlay:
+            return overlay_rc
+    if not write_underlay:
+        print("\n[Done] All outputs written.")
+        return 0
 
     model_path = out_dir / "ns_model.json"
     model_path.write_text(

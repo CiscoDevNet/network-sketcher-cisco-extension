@@ -70,7 +70,66 @@ python -m cml_converter.src.fetch_from_cml \
 python -m cml_converter.src.convert \
     --yaml cml_export.json \
     --out  output/ns_commands.txt
+
+# 6. Optional: draw the overlay (VXLAN EVPN / SD-WAN / L3VPN) found in the
+#    configs as one integrated script (output/ns_commands_cml_overlay.txt).
+#    --mode both writes the underlay and the overlay.
+python -m cml_converter.src.convert \
+    --yaml my_lab.yaml \
+    --out  output/ns_commands.txt \
+    --mode overlay
 ```
+
+## Overlay mode
+
+`--mode` chooses what is written:
+
+| `--mode` | Output |
+|----------|--------|
+| `underlay` (default) | The physical L1/L2/L3 script, exactly as before |
+| `overlay` | One integrated overlay script, `<stem>_cml_overlay.txt` |
+| `both` | Both scripts |
+
+The overlay is read from each node's saved config, from a YAML export or a
+`fetch_from_cml` JSON alike. Three overlays are recognised and drawn together
+in the same areas:
+
+| Overlay | Recognised from | Drawn as (same style as) |
+|---------|-----------------|--------------------------|
+| **VXLAN EVPN** | NX-OS `vlan` / `vn-segment`, `vrf context` / `vni`, `interface nve1` / `member vni`; IOS-XE `vlan configuration` / `member evpn-instance … vni`, `member vni … vrf` | `VRF-GW:<area>-<vrf>` (distributed anycast gateway with the SVI IPs), `NET:<area>-<vlan name>` per L2VNI, and the hosts on leaf access ports (`nd_converter`). The leaves themselves are not drawn |
+| **SD-WAN** | cEdge `system` (`system-ip`, `site-id`), the `sdwan` stanza's `tunnel-interface` ports or `tunnel mode sdwan`, numbered `vrf definition` Service VPNs | One waypoint cloud `VPN:<lab>-<id>` per Service VPN, linked from a synthetic `Vpn <id>` port on each Edge; real Service VPN ports face the LAN (`sdwan_converter`) |
+| **L3VPN** | `router bgp` with `address-family vpnv4` / `vpnv6` and a VRF on a port; transport LDP / SR-MPLS / SRv6 named in the Attribute | One waypoint cloud `VRF:<lab>-<name>` per VRF (RD / route targets in its Attribute), linked from a synthetic `Vrf <n>` port on each PE; the PE's VRF ports link to their CEs |
+
+`--overlay {auto,evpn,sdwan,l3vpn}` (repeatable) narrows the types drawn;
+`auto` (default) draws every type found. ACI is not available from a CML lab.
+
+**Areas.** Each SD-WAN site is one area, `<lab>-site<site-id>`. Every other
+node joins the site of its nearest Edge over CML links on the LAN side; the
+search never leaves an Edge through a WAN transport port, and a tie goes to the
+smaller site-id. A lab without SD-WAN, and any node no Edge reaches, uses the
+area `<lab>` (the lab title, or the YAML file name). The VPN and VRF clouds sit
+in `<lab>-wan_wp_`, on its own row above that lab's sites. Inside an area the
+rows are, top to bottom: Edge / PE, VRF-GW, NET / LAN switch, hosts / CE.
+
+**Handoffs.** A CML link whose two ends are overlay ports (for example a
+border leaf `vrf member BLUE` port cabled to a cEdge Service VPN 10 port) is
+drawn as one link between the VRF-GW and the Edge, with the IP and VRF of each
+real port. A CML unmanaged switch (or a switch with no config) in between is
+drawn, and every node cabled to it is resolved the same way. A CE / VRF-lite
+router on the LAN side is drawn with its own IP and VRF. Each pairing is
+written to Attribute-E (`Handoff: …`) and to `overlay_report.md`:
+`confirmed` when the two ports share a subnet, `inferred` otherwise. A link
+that would join two different site areas is not drawn (Network Sketcher
+allows no direct link between two non-waypoint areas); it is listed in the
+report. A Service VPN port with no CML link goes to a gray `LAN:<edge>` dummy
+switch, as in `sdwan_converter`. Port Speed / Duplex / Type are `Unknown`.
+
+**No overlay.** When the configs hold none of the three (or none of the
+`--overlay` types), `--mode overlay` prints
+`[ERROR] No overlay configuration (VXLAN EVPN / SD-WAN / L3VPN) was found in the node configs.`
+and exits with code **3**, listing the nodes that still carry CML's day-0
+config (run **Extract Configs** in CML and convert again). `--mode both` prints
+the same message as a warning, writes the underlay, and exits 0.
 
 ## Fetching labs from CML
 
@@ -138,7 +197,8 @@ applies there too.
   its release (for example `iosxrd-cp-<version>`, the XRd Control Plane) is
   matched by the name before the version.
 - **Not drawn**: MTU, VRF route distinguishers and route targets,
-  route-policies and link conditioning have no place in Network Sketcher.
+  route-policies and link conditioning have no place in the underlay. The
+  overlay script names a VRF's RD and route targets in its cloud's Attribute.
 
 ## Output files
 
@@ -148,6 +208,9 @@ applies there too.
 | `ns_model.json` | Intermediate topology model for debugging |
 | `stencil_mapping.csv` | Device stencil-type mapping with confidence scores |
 | `parse_report.md` | Per-device running-config coverage statistics, skipped ports, and nodes whose config was never extracted in CML |
+| `<stem>_cml_overlay.txt` | `--mode overlay` / `both`: the integrated overlay script (Phase 1–6) |
+| `ns_model_overlay.json` | `--mode overlay` / `both`: the overlay model for debugging |
+| `overlay_report.md` | `--mode overlay` / `both`: overlay devices and their areas, handoffs (`confirmed` / `inferred`), links not drawn, day-0 nodes |
 
 ## Device color conventions
 
@@ -166,6 +229,8 @@ The two WayPoint colours separate **observed** WayPoints (blue, backed by a real
 Two further fixed cell colours appear in every device row (set by the shared `ns_command_builder`, not role-based): the **Model** column is pink `[255, 183, 219]` and the **OS** column is light blue `[200, 230, 255]`.
 
 **In cml_converter:** a node is a Waypoint only when its Attribute **Model** contains `External Connector` (the CML `external_connector` bridge to the host network). It renders **light blue**. Every other node is a normal device, including a router or switch whose name contains wan, internet, or cloud. Network gear (Router / L3Switch / Switch / Firewall / WLC / AP) is **green**, servers are **red**, and PC / Phone endpoints are **yellow**.
+
+**In the overlay script:** the VPN / VRF clouds, the VRF-GWs, the NETs and the SD-WAN Edges / L3VPN PEs are **light purple** `[221, 204, 255]` (overlay), as in `nd_converter` and `sdwan_converter`. A `LAN:<edge>` dummy switch is **light gray**. CEs, LAN switches and hosts keep their role colour.
 
 ## Running the output in Network Sketcher
 
@@ -203,10 +268,21 @@ cml_converter/
 ├── README.md            (this file)
 ├── requirements.txt
 ├── .gitignore
-└── src/                 (convert.py, fetch_from_cml.py)
+└── src/                 (convert.py, fetch_from_cml.py, overlay_*.py)
 ```
 
 ## Changelog
+
+### Overlay mode
+
+- **`--mode {underlay,overlay,both}`**: `overlay` writes one integrated
+  overlay script (VXLAN EVPN, SD-WAN and L3VPN found in the saved configs,
+  with the handoffs between them) plus `ns_model_overlay.json` and
+  `overlay_report.md`. The default `underlay` output is unchanged.
+  `--overlay` narrows the types drawn. No overlay found exits with code 3.
+- **Classic IOS `ip vrf forwarding <name>`**: the interface's VRF and the IP
+  address after it were lost, because the line was taken for the start of a
+  top-level `ip vrf` stanza. Both are now read (underlay and overlay).
 
 ### API fetch
 

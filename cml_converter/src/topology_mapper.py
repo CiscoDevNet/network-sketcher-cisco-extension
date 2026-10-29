@@ -78,6 +78,8 @@ class NSDevice:
     x: Optional[float] = None      # CML canvas X coordinate (None if absent)
     y: Optional[float] = None      # CML canvas Y coordinate (None if absent)
     default_color: Optional[Tuple[int, int, int]] = None  # overrides role colour in the Attribute 'Default' cell
+    attribute_prefix: str = "Routing"  # label in front of routing_attribute in Attribute-D
+    attribute_e: str = ""          # Attribute-E text (the overlay's handoffs); omitted when empty
 
 
 @dataclass

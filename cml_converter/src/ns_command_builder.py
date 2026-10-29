@@ -124,11 +124,13 @@ def cmd_add_l1_link_bulk(model: NSModel) -> Optional[str]:
     return f"add l1_link_bulk \"{payload}\""
 
 
-def cmd_rename_port_info_bulk(model: NSModel) -> Optional[str]:
+def cmd_rename_port_info_bulk(model: NSModel, unknown: bool = False) -> Optional[str]:
     """Phase 2.5: set Speed/Duplex/Port_Type for all L1 ports of every device.
 
     POC defaults: 10Gbps full 10GBASE-SR for L3Switches, 1Gbps full 1000BASE-T
     for everything else. Endpoints get 1Gbps as well. Uses `_ALL_` per device.
+    With ``unknown`` (the overlay, whose links are logical) every port is
+    Unknown/Unknown/Unknown.
     """
     if not model.devices:
         return None
@@ -136,7 +138,9 @@ def cmd_rename_port_info_bulk(model: NSModel) -> Optional[str]:
     for d in model.devices.values():
         if d.stencil.stencil_type == NS_CLOUD:
             continue
-        if d.stencil.stencil_type == "L3Switch":
+        if unknown:
+            spec = ("Unknown", "Unknown", "Unknown")
+        elif d.stencil.stencil_type == "L3Switch":
             spec = ("10Gbps", "Full", "10GBASE-SR")
         elif d.stencil.stencil_type == "Router":
             spec = ("1Gbps", "Full", "1000BASE-T")
@@ -348,8 +352,11 @@ def cmd_rename_attribute_bulk(model: NSModel) -> str:
     rows: List[str] = []
     for name, d in sorted(model.devices.items()):
         # Waypoint is the Model text, not the area name. A router that landed
-        # in a wan-labelled area is still a normal device.
-        if model_is_external_connector(d.stencil.model):
+        # in a wan-labelled area is still a normal device. The overlay's
+        # VPN / VRF clouds are Cloud stencils placed in a ``*_wp_`` area.
+        if model_is_external_connector(d.stencil.model) or (
+            d.stencil.stencil_type == NS_CLOUD and d.area.endswith("_wp_")
+        ):
             token, rgb = "WayPoint", _OBSERVED_WAYPOINT_BLUE
         elif d.stencil.stencil_type == NS_SERVER:
             token, rgb = "DEVICE", _COLOR_SERVER
@@ -371,11 +378,14 @@ def cmd_rename_attribute_bulk(model: NSModel) -> str:
         # Routing summary truncated to ~120 chars to keep the bulk command sane.
         routing_summary = (d.routing_attribute or "").strip().replace("\n", " | ")
         routing_summary = routing_summary[:120]
-        attr_d_cell = _attr_cell(f"Routing: {routing_summary}" if routing_summary else "", _COLOR_WHITE)
+        prefix = getattr(d, "attribute_prefix", "Routing") or "Routing"
+        attr_d_cell = _attr_cell(f"{prefix}: {routing_summary}" if routing_summary else "", _COLOR_WHITE)
+        attr_e = (getattr(d, "attribute_e", "") or "").strip().replace("\n", " | ")[:200]
+        attr_e_cell = f", {_attr_cell(attr_e, _COLOR_WHITE)}" if attr_e else ""
 
         # Empties (omitted -> auto-completed white per RULE 16 documentation).
         rows.append(
-            f"['{name}', {default_cell}, {model_cell}, {os_cell}, {stencil_cell}, {attr_d_cell}]"
+            f"['{name}', {default_cell}, {model_cell}, {os_cell}, {stencil_cell}, {attr_d_cell}{attr_e_cell}]"
         )
 
     payload = "[" + ",".join(rows + [header]) + "]"
@@ -397,7 +407,7 @@ class CommandScript:
         return "\n".join(self.lines) + "\n"
 
 
-def build_command_script(model: NSModel) -> CommandScript:
+def build_command_script(model: NSModel, port_info_unknown: bool = False) -> CommandScript:
     lines: List[str] = []
     counts: Dict[str, int] = {}
 
@@ -425,7 +435,7 @@ def build_command_script(model: NSModel) -> CommandScript:
 
     # Phase 2 + 2.5
     _add("2 l1_link_bulk", cmd_add_l1_link_bulk(model))
-    _add("2.5 port_info_bulk", cmd_rename_port_info_bulk(model))
+    _add("2.5 port_info_bulk", cmd_rename_port_info_bulk(model, unknown=port_info_unknown))
 
     # Phase 3 (sub-if bindings -> portchannel -> virtual_port -> l2_segment).
     # Sub-interface bindings run first so their parent L1 ports (from Phase 2)
