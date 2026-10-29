@@ -104,5 +104,6 @@ def build_l3vpn(
             attachments.append(Attachment(
                 device=pe, port=port, overlay="l3vpn", context=f"VRF {ctx.vrf}",
                 vrf=ctx.vrf, cidrs=ctx.cidrs, draw_device=pe, draw_port=port,
+                members=f.members.get(port, []),
             ))
     return attachments

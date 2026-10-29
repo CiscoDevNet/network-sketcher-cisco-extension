@@ -116,7 +116,10 @@ file.
 
 1. Install Network Sketcher by following the instructions in the
    [cisco-open/network-sketcher](https://github.com/cisco-open/network-sketcher)
-   repository.
+   repository. **Use Network Sketcher ver 3.1.2v or later.** `config_converter`,
+   `cml_converter`, `meraki_converter` and `netbox_converter` write untagged
+   (native) VLANs with the `_UNTAG_` suffix (for example `Vlan1_UNTAG_`), which
+   older versions do not read, so those VLANs would be drawn unconnected.
 2. Create (or choose) an empty master file, e.g. `[MASTER]my_lab.nsm`. Starting
    from a freshly created empty master keeps Phase 1 device/area placement on a
    clean canvas.

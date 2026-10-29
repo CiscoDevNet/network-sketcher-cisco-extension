@@ -186,8 +186,10 @@ def cmd_add_vport_l2_direct_binding(model: NSModel) -> List[str]:
         if key in seen:
             continue
         seen.add(key)
+        # 'Vlan<id>' (not 'vlan<id>') so it matches the switch-side segment,
+        # quoted because the MCP command validator requires it.
         out.append(
-            f"add vport_l2_direct_binding '{si.device}' '{si.subif_port}' vlan{si.vlan_id}"
+            f"add vport_l2_direct_binding '{si.device}' '{si.subif_port}' 'Vlan{si.vlan_id}'"
         )
     return out
 

@@ -254,6 +254,23 @@ these automatically:
 
 ## Changelog
 
+### Untagged (native) VLAN notation
+
+- **Native VLANs are written with `_UNTAG_`** (Network Sketcher RULE 9.5): a
+  trunk's native VLAN (`switchport trunk native vlan N`, or VLAN 1 by default
+  when the trunk carries it) is `VlanN_UNTAG_`, and a sub-interface with
+  `encapsulation dot1Q N native` is bound to `VlanN_UNTAG_`. A port facing
+  another port's `_UNTAG_` VLAN with the same tagged name (an access port, a
+  Dummy peer, a sub-interface) becomes `_UNTAG_` too, so existing links keep
+  their broadcast domain. **Requires Network Sketcher ver 3.1.2v or later**
+  (the first version that reads `_UNTAG_`; an older one leaves native VLANs
+  unconnected).
+- **Fixed: `encapsulation dot1Q N`** (upper-case `Q`, the usual spelling) was
+  not read, so the sub-interface lost its VLAN binding.
+- **Fixed: a sub-interface VLAN binding is written `'Vlan<id>'`**, quoted. The
+  lower-case `vlan<id>` never joined the switch's `Vlan<id>` segment, and the
+  unquoted form is rejected by the Network Sketcher MCP command validator.
+
 ### Ver 0.5.1b (2026-09-03)
 
 - **Bug fix (IOS-XR LAG names)**: `add portchannel_bulk` now uses the logical

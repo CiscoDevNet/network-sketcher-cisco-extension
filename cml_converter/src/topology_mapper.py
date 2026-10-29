@@ -61,6 +61,7 @@ from .stencil_mapper import (
     NS_AP, NS_FIREWALL, NS_L3SWITCH, NS_PC, NS_ROUTER,
     NS_SERVER, NS_SWITCH, NS_WLC, StencilMapping, model_is_external_connector,
 )
+from .untag import apply_untag_consistency, vlan_segments
 
 
 # ---------------------------------------------------------------------------
@@ -132,6 +133,7 @@ class NSSubInterface:
     parent_port: str                # 'GigabitEthernet 0/1'
     subif_port: str                 # 'GigabitEthernet 0/1.10'
     vlan_id: Optional[int] = None   # dot1q encapsulation VLAN, if any
+    native: bool = False            # 'encapsulation dot1Q N native' -> 'VlanN_UNTAG_'
 
 
 @dataclass
@@ -1090,6 +1092,7 @@ def apply_parsed_configs(
                     model.subinterfaces.append(NSSubInterface(
                         device=label, parent_port=parent_port,
                         subif_port=ns_port, vlan_id=iface.access_vlan,
+                        native=iface.dot1q_native,
                     ))
                     if iface.has_ip():
                         model.ip_assignments.append(NSIPAssignment(
@@ -1244,7 +1247,10 @@ def _trunk_vlans(iface: Any) -> List[str]:
     vids = list(iface.trunk_allowed_vlans)
     if iface.trunk_native_vlan is not None and iface.trunk_native_vlan not in vids:
         vids.append(iface.trunk_native_vlan)
-    return [f"Vlan{v}" for v in vids]
+    # The native VLAN is untagged (RULE 9.5 '_UNTAG_'); with no 'native vlan'
+    # line it is VLAN 1, the IOS / NX-OS default, when the trunk carries it.
+    native = iface.trunk_native_vlan if iface.trunk_native_vlan is not None else 1
+    return vlan_segments(vids, native)
 
 
 # ---------------------------------------------------------------------------
@@ -1279,6 +1285,7 @@ def build_ns_model(
         cml_node_labels={str(n.get("label", "")) for n in nodes},
     )
     prune_unlinked_ports(model)
+    apply_untag_consistency(model)
     return model, parse_stats
 
 

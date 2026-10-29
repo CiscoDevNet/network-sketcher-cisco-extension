@@ -459,7 +459,7 @@ def _write_overlay(
     print("[4b] Building integrated overlay …")
     wanted = args.overlay or ["auto"]
     result = build_overlay_model(
-        nodes, underlay.l1_links, stencil_map, raw_configs, parsed_configs,
+        nodes, underlay, stencil_map, raw_configs, parsed_configs,
         default_lab=_default_lab_name(raw_data, yaml_path), wanted=wanted,
     )
     explicit = [t for t in wanted if t != "auto"]
@@ -484,7 +484,8 @@ def _write_overlay(
             print("        The underlay is written; the overlay is skipped.", file=sys.stderr)
         return EXIT_NO_OVERLAY
 
-    script = build_command_script(result.model, port_info_unknown=True)
+    overlay_devices = set(result.model.devices) - result.canvas.underlay_devices
+    script = build_command_script(result.model, port_info_unknown=overlay_devices)
     overlay_path = out_dir / f"{out_path.stem}_cml_overlay.txt"
     overlay_path.write_text(script.text(), encoding="utf-8")
     (out_dir / "ns_model_overlay.json").write_text(
@@ -497,6 +498,8 @@ def _write_overlay(
     print(f"  ns_model_overlay.json / overlay_report.md → {out_dir}")
     print(f"         {len(result.model.devices)} device(s), {len(result.model.l1_links)} link(s), "
           f"{len(result.canvas.handoffs)} handoff(s), {sum(script.counts.values())} command(s)")
+    print(f"         {len(result.canvas.underlay_devices)} device(s) drawn as in the underlay"
+          + (f"; labs with no overlay: {', '.join(result.underlay_labs)}" if result.underlay_labs else ""))
     if result.canvas.notes:
         print(f"  [WARN] {len(result.canvas.notes)} overlay note(s). See overlay_report.md.")
     return 0

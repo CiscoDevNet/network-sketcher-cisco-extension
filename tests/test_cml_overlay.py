@@ -212,6 +212,81 @@ router bgp 65010
 !
 """
 
+XR_PE_BUNDLE = """hostname pe-be
+vrf CUST
+ address-family ipv4 unicast
+  import route-target
+   65000:200
+  !
+  export route-target
+   65000:200
+  !
+ !
+!
+interface Bundle-Ether1
+ description to-CE
+ vrf CUST
+ ipv4 address 198.51.100.1 255.255.255.252
+!
+interface Loopback0
+ ipv4 address 10.255.255.11 255.255.255.255
+!
+interface GigabitEthernet0/0/0/0
+ ipv4 address 10.0.13.1 255.255.255.252
+!
+interface GigabitEthernet0/0/0/1
+ description to-CE
+ bundle id 1 mode on
+!
+router bgp 65000
+ address-family vpnv4 unicast
+ !
+ vrf CUST
+  rd 1:200
+  address-family ipv4 unicast
+   redistribute connected
+!
+segment-routing
+ srv6
+  locators
+   locator MAIN
+    prefix 2001:db8:0:11::/64
+"""
+
+P_ROUTER = """hostname p1
+interface Loopback0
+ ipv4 address 10.255.255.12 255.255.255.255
+!
+interface GigabitEthernet0/0/0/0
+ ipv4 address 10.0.13.2 255.255.255.252
+!
+"""
+
+IOS_PE_PO = """hostname ios-pe-po
+ip vrf RED
+ rd 65010:2
+ route-target export 65010:2
+ route-target import 65010:2
+!
+interface Port-channel1
+ ip vrf forwarding RED
+ ip address 192.0.2.9 255.255.255.252
+!
+interface GigabitEthernet0/1
+ channel-group 1 mode active
+!
+interface GigabitEthernet0/2
+ channel-group 1 mode active
+!
+router bgp 65010
+ address-family vpnv4
+  neighbor 10.0.0.2 activate
+ exit-address-family
+!
+"""
+
+DAY0 = "hostname inserthostname-here\n"
+
 CE = """hostname {name}
 interface GigabitEthernet0/0
  ip address {ip} 255.255.255.252
@@ -250,11 +325,12 @@ def _lab_yaml(title: str, nodes: List[NodeSpec], links: List[LinkSpec]) -> Dict:
     return {"lab": {"title": title, "version": "0.2.2"}, "nodes": out_nodes, "links": out_links}
 
 
-def _lab_fetch_json(title: str, nodes: List[NodeSpec], links: List[LinkSpec]) -> Dict:
+def _lab_fetch_json(title: str, nodes: List[NodeSpec], links: List[LinkSpec],
+                    prefix: str = "node") -> Dict:
     """The same lab as fetch_from_cml writes it (API ids, node_a/interface_a)."""
     out_nodes, index = [], {}
     for n, (label, nd, ifaces, cfg) in enumerate(nodes):
-        nid = f"node-{n:04d}"
+        nid = f"{prefix}-{n:04d}"
         ifs = [{"id": f"{nid}-if{k}", "label": l, "type": "physical", "node": nid}
                for k, l in enumerate(ifaces)]
         node = {"id": nid, "label": label, "node_definition": nd,
@@ -268,7 +344,15 @@ def _lab_fetch_json(title: str, nodes: List[NodeSpec], links: List[LinkSpec]) ->
          "node_b": index[b][0], "interface_b": index[b][1][bp]}
         for k, (a, ap, b, bp) in enumerate(links)
     ]
-    return {"labs": [{"id": "lab-1", "lab_title": title, "nodes": out_nodes, "links": out_links}]}
+    return {"labs": [{"id": f"{prefix}-lab", "lab_title": title, "nodes": out_nodes, "links": out_links}]}
+
+
+def _labs_fetch_json(*labs: Tuple[str, List[NodeSpec], List[LinkSpec]]) -> Dict:
+    """Several labs in one fetch_from_cml document."""
+    out: List[Dict] = []
+    for i, (title, nodes, links) in enumerate(labs):
+        out.extend(_lab_fetch_json(title, nodes, links, prefix=f"lab{i}")["labs"])
+    return {"labs": out}
 
 
 def _evpn_nodes(border: bool = False) -> List[NodeSpec]:
@@ -387,8 +471,12 @@ class EvpnTests(unittest.TestCase):
         gw, net = "VRF-GW:evpn-lab-BLUE", "NET:evpn-lab-WEB"
         self.assertIn(gw, devices)
         self.assertIn(net, devices)
-        for leaf in ("spine1", "leaf1", "leaf2"):
-            self.assertNotIn(leaf, devices)
+        for leaf in ("leaf1", "leaf2"):
+            self.assertNotIn(leaf, devices)     # the VRF-GW stands for the VTEPs
+        # The spine takes no part in the overlay: drawn as in the underlay, unlinked.
+        self.assertIn("spine1", devices)
+        self.assertIsNone(_linked(m, "spine1", "leaf1"))
+        self.assertIn("the EVPN VTEP leaf1 is shown as its VRF-GW", run.report)
         self.assertEqual(devices[gw]["area"], "evpn-lab")
         self.assertEqual(_ips(m)[(gw, "Vlan 10")], ["10.10.10.1/24"])
         self.assertEqual(_vrfs(m)[(gw, "Vlan 10")], "BLUE")
@@ -424,7 +512,11 @@ class SdwanTests(unittest.TestCase):
         self.assertEqual(d["dc-edge"]["area"], "sdwan-site100")
         self.assertEqual(d["br-edge"]["area"], "sdwan-site200")
         self.assertEqual(d["VPN:sdwan-10"]["area"], "sdwan-wan_wp_")
-        self.assertNotIn("INET", d)          # WAN transport stays in the underlay
+        # The transport switch is drawn as in the underlay in the lab area; its
+        # links to the Edges would join two areas, so they are reported instead.
+        self.assertEqual(d["INET"]["area"], "sdwan")
+        self.assertIsNone(_linked(m, "INET", "dc-edge"))
+        self.assertIn("INET Ethernet 0 [sdwan] would cross areas", run.report)
         for edge in ("dc-edge", "br-edge"):
             lk = _linked(m, edge, "VPN:sdwan-10")
             self.assertIsNotNone(lk)
@@ -462,7 +554,9 @@ class L3vpnTests(unittest.TestCase):
             self.assertEqual(m["devices"][pe]["area"], "l3")
             self.assertIsNotNone(_linked(m, pe, cloud))
             self.assertEqual(_vrfs(m)[(pe, "Vrf 1")], "CUST-A")
-        self.assertIsNone(_linked(m, "pe1", "pe2"))   # the core stays in the underlay
+        # The core link is an underlay link between two drawn devices.
+        self.assertIsNotNone(_linked(m, "pe1", "pe2"))
+        self.assertEqual(_ips(m)[("pe1", "GigabitEthernet 0/0/0/0")], ["10.0.12.1/24"])
         lk = _linked(m, "pe1", "ce1")
         self.assertIsNotNone(lk)
         self.assertEqual(_ips(m)[("ce1", "GigabitEthernet 0/0")], ["203.0.113.2/30"])
@@ -532,6 +626,108 @@ class MixedTests(unittest.TestCase):
         self.assertEqual(a.rc, 0, a.stderr)
         self.assertEqual(b.rc, 0, b.stderr)
         self.assertEqual(a.script, b.script)
+
+
+class LagTests(unittest.TestCase):
+    def test_xr_bundle_ether_vrf_port_reaches_a_day0_ce(self):
+        run = _overlay("be", [
+            ("pe-be", "xrd", ["GigabitEthernet0/0/0/0", "GigabitEthernet0/0/0/1"], XR_PE_BUNDLE),
+            ("ce-d0", "iosv", ["GigabitEthernet0/0", "GigabitEthernet0/1"], DAY0),
+        ], [("pe-be", "GigabitEthernet0/0/0/1", "ce-d0", "GigabitEthernet0/1")])
+        m = run.model
+        self.assertIn("ce-d0", m["devices"])
+        self.assertEqual(_linked(m, "pe-be", "ce-d0"),
+                         ("pe-be", "GigabitEthernet 0/0/0/1", "ce-d0", "GigabitEthernet 0/1"))
+        self.assertIn({"device": "pe-be", "physical_ports": ["GigabitEthernet 0/0/0/1"],
+                       "portchannel_name": "Bundle-Ether 1"}, m["port_channels"])
+        self.assertEqual(_ips(m)[("pe-be", "Bundle-Ether 1")], ["198.51.100.1/30"])
+        self.assertEqual(_vrfs(m)[("pe-be", "Bundle-Ether 1")], "CUST")
+        self.assertNotIn(("pe-be", "GigabitEthernet 0/0/0/1"), _ips(m))
+        self.assertNotIn("has no CML link", run.report)
+
+    def test_ios_port_channel_with_two_members(self):
+        run = _overlay("po", [
+            ("ios-pe-po", "iosv", ["GigabitEthernet0/1", "GigabitEthernet0/2"], IOS_PE_PO),
+            ("sw-ce", "unmanaged_switch", ["port0", "port1", "port2"], ""),
+            ("ce-po", "iosv", ["GigabitEthernet0/0"], CE.format(name="ce-po", ip="192.0.2.10")),
+        ], [("ios-pe-po", "GigabitEthernet0/1", "sw-ce", "port0"),
+            ("ios-pe-po", "GigabitEthernet0/2", "sw-ce", "port1"),
+            ("sw-ce", "port2", "ce-po", "GigabitEthernet0/0")])
+        m = run.model
+        pcs = [pc for pc in m["port_channels"] if pc["device"] == "ios-pe-po"]
+        self.assertEqual(pcs, [{"device": "ios-pe-po",
+                                "physical_ports": ["GigabitEthernet 0/1", "GigabitEthernet 0/2"],
+                                "portchannel_name": "Port-channel 1"}])
+        self.assertEqual(_vrfs(m)[("ios-pe-po", "Port-channel 1")], "RED")
+        self.assertIsNotNone(_linked(m, "sw-ce", "ce-po"))
+        self.assertEqual(_ips(m)[("ce-po", "GigabitEthernet 0/0")], ["192.0.2.10/30"])
+        self.assertEqual(_ips(m)[("ios-pe-po", "Port-channel 1")], ["192.0.2.9/30"])
+
+
+class MixedUnderlayTests(unittest.TestCase):
+    """An overlay lab keeps its other devices as underlay; a lab with no overlay is the underlay."""
+
+    def _doc(self) -> Dict:
+        l3 = [
+            ("pe-be", "xrd", ["GigabitEthernet0/0/0/0", "GigabitEthernet0/0/0/1"], XR_PE_BUNDLE),
+            ("p1", "xrd", ["GigabitEthernet0/0/0/0"], P_ROUTER),
+            ("ce-d0", "iosv", ["GigabitEthernet0/0", "GigabitEthernet0/1"], DAY0),
+            ("ext", "external_connector", ["port"], ""),
+        ]
+        l3_links = [("pe-be", "GigabitEthernet0/0/0/0", "p1", "GigabitEthernet0/0/0/0"),
+                    ("pe-be", "GigabitEthernet0/0/0/1", "ce-d0", "GigabitEthernet0/1"),
+                    ("ce-d0", "GigabitEthernet0/0", "ext", "port")]
+        plain = [
+            ("r1", "iosv", ["GigabitEthernet0/0"], CE.format(name="r1", ip="192.0.2.21")),
+            ("r2", "iosv", ["GigabitEthernet0/0"], CE.format(name="r2", ip="192.0.2.22")),
+        ]
+        plain_links = [("r1", "GigabitEthernet0/0", "r2", "GigabitEthernet0/0")]
+        return _labs_fetch_json(("l3lab", l3, l3_links), ("plainlab", plain, plain_links))
+
+    def _run(self) -> _Run:
+        run = _convert(self._doc(), "--mode", "both", as_json=True)
+        self.assertEqual(run.rc, 0, run.stderr)
+        return run
+
+    def test_overlay_lab_draws_its_other_devices_as_underlay(self):
+        run = self._run()
+        m = run.model
+        d = m["devices"]
+        self.assertEqual(d["p1"]["area"], "l3lab")
+        self.assertIsNotNone(_linked(m, "pe-be", "p1"))
+        self.assertEqual(_ips(m)[("pe-be", "GigabitEthernet 0/0/0/0")], ["10.0.13.1/30"])
+        self.assertEqual(_ips(m)[("p1", "GigabitEthernet 0/0/0/0")], ["10.0.13.2/30"])
+        self.assertEqual(_ips(m)[("p1", "Loopback 0")], ["10.255.255.12/32"])
+        # The External Connector keeps its underlay waypoint area and link.
+        self.assertEqual(d["ext"]["area"], "l3lab-ext_wp_")
+        self.assertIsNotNone(_linked(m, "ce-d0", "ext"))
+        self.assertIn("p1 [l3lab]", run.report)
+
+    def test_lab_without_overlay_is_the_underlay(self):
+        run = self._run()
+        m = run.model
+        under = json.loads((run.out_dir / "ns_model.json").read_text(encoding="utf-8"))
+        self.assertEqual(m["area_to_devices"]["plainlab"], under["area_to_devices"]["plainlab"])
+        for name in ("r1", "r2"):
+            self.assertEqual(m["devices"][name]["area"], "plainlab")
+        self.assertIsNotNone(_linked(m, "r1", "r2"))
+        self.assertEqual(_ips(m)[("r1", "GigabitEthernet 0/0")], ["192.0.2.21/30"])
+        self.assertIn("Labs with no overlay, copied from the underlay: plainlab.", run.report)
+        # Port info is the underlay's for underlay devices, Unknown for the overlay ones.
+        self.assertIn("[['r1','r2'],'_ALL_',['1Gbps','Full','1000BASE-T']]", run.script.replace("'p1',", ""))
+        self.assertIn("'pe-be'],'_ALL_',['Unknown','Unknown','Unknown']", run.script)
+        # Labs sit side by side as in the underlay, the WAN waypoint row above.
+        self.assertEqual(m["area_layout"][0], ["l3lab-wan_wp_"])
+        flat = [a for row in m["area_layout"] for a in row]
+        self.assertIn("plainlab", flat)
+        for row in m["area_layout"]:
+            for left, right in zip(row, row[1:]):
+                self.assertFalse(left.endswith("_wp_") and right.endswith("_wp_"), row)
+
+    def test_overlay_attributes_keep_their_kind(self):
+        run = self._run()
+        self.assertIn("['r1', \\\"['DEVICE',[235, 241, 222]]\\\"", run.script)
+        self.assertIn("['pe-be', \\\"['DEVICE',[221, 204, 255]]\\\"", run.script)
 
 
 class ParserTests(unittest.TestCase):

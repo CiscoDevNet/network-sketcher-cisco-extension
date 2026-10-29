@@ -174,5 +174,6 @@ def build_evpn(
                 attachments.append(Attachment(
                     device=leaf, port=port, overlay="evpn", context=f"VRF {ctx.vrf}",
                     vrf=ctx.vrf, cidrs=ctx.cidrs, draw_device=gateway(ctx.vrf),
+                    members=facts[leaf].members.get(port, []),
                 ))
     return attachments

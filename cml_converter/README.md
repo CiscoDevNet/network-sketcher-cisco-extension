@@ -122,7 +122,28 @@ written to Attribute-E (`Handoff: …`) and to `overlay_report.md`:
 that would join two different site areas is not drawn (Network Sketcher
 allows no direct link between two non-waypoint areas); it is listed in the
 report. A Service VPN port with no CML link goes to a gray `LAN:<edge>` dummy
-switch, as in `sdwan_converter`. Port Speed / Duplex / Type are `Unknown`.
+switch, as in `sdwan_converter`. A VRF / VPN port on a `Bundle-Ether` or
+`Port-channel` is followed through its member ports: the member carries the
+link, and the IP and VRF stay on the logical port, as in the underlay.
+
+**Overlay and underlay in one script.** Only a lab with an overlay is drawn as
+an overlay; the rest stays as in the underlay:
+
+- In a lab with an overlay, the devices that take no part in it (P routers,
+  SD-WAN controllers and transport switches, External Connectors) are drawn
+  with their underlay ports, addresses and colours in the same areas, and
+  every underlay link between two drawn devices is added, so the overlay
+  devices stay connected to the rest of the lab. An EVPN leaf is not drawn
+  (its VRF-GW stands for it), so its links to the spine are left out.
+- A lab with no overlay is copied from the underlay: its areas, device grid,
+  links, L2 / L3, port-channels and External Connector waypoint areas.
+- Labs are arranged as in the underlay; an overlay lab takes the place of its
+  underlay area, with its WAN waypoint row above. Areas are joined the way the
+  underlay joins them (through External Connector waypoints only); a link that
+  would join two areas directly, such as a cEdge transport port to a transport
+  switch in the lab area, is not drawn and is listed in `overlay_report.md`.
+- Port Speed / Duplex / Type are `Unknown` on the overlay devices and the
+  underlay values on the devices drawn as in the underlay.
 
 **No overlay.** When the configs hold none of the three (or none of the
 `--overlay` types), `--mode overlay` prints
@@ -283,6 +304,29 @@ cml_converter/
 - **Classic IOS `ip vrf forwarding <name>`**: the interface's VRF and the IP
   address after it were lost, because the line was taken for the start of a
   top-level `ip vrf` stanza. Both are now read (underlay and overlay).
+- **Overlay on a LAG**: a VRF port on `Bundle-Ether` / `Port-channel` was left
+  out of the overlay (with the CE behind it), because the CML link is on a
+  member port. The member link and the port-channel are now drawn.
+- **Overlay and underlay in one overlay script**: labs with no overlay are
+  drawn as in the underlay, and an overlay lab's other devices are drawn as in
+  the underlay and linked to the overlay devices by their underlay links.
+
+### Untagged (native) VLAN notation
+
+- **Native VLANs are written with `_UNTAG_`** (Network Sketcher RULE 9.5): a
+  trunk's native VLAN (`switchport trunk native vlan N`, or VLAN 1 by default
+  when the trunk carries it) is `VlanN_UNTAG_`, and a sub-interface with
+  `encapsulation dot1Q N native` is bound to `VlanN_UNTAG_`. A port facing
+  another port's `_UNTAG_` VLAN with the same tagged name (an access port, a
+  sub-interface) becomes `_UNTAG_` too, so existing links keep their broadcast
+  domain. The overlay copies these names with the underlay. **Requires
+  Network Sketcher ver 3.1.2v or later** (the first version that reads
+  `_UNTAG_`; an older one leaves native VLANs unconnected).
+- **Fixed: `encapsulation dot1Q N`** (upper-case `Q`) was not read, so the
+  sub-interface lost its VLAN binding.
+- **Fixed: a sub-interface VLAN binding is written `'Vlan<id>'`**, quoted. The
+  lower-case `vlan<id>` never joined the switch's `Vlan<id>` segment, and the
+  unquoted form is rejected by the Network Sketcher MCP command validator.
 
 ### API fetch
 

@@ -123,6 +123,7 @@ from .ns_model import (
     normalise_port_name,
 )
 from . import stencil_mapper as sten
+from .untag import apply_untag_consistency, vlan_segments
 
 # RULE 0 vertical tier per stencil type — copied from
 # template_converter/src/platform_mapper.py.template's ``_TIER`` (also used,
@@ -2274,7 +2275,10 @@ def _trunk_vlans(
         vids.append(iface.trunk_native_vlan)
     if not vids and default_trunk_vlans:
         vids = list(default_trunk_vlans)
-    return [f"Vlan{v}" for v in vids]
+    # The native VLAN is untagged (RULE 9.5 '_UNTAG_'); with no 'native vlan'
+    # line it is VLAN 1, the IOS / NX-OS default, when the trunk carries it.
+    native = iface.trunk_native_vlan if iface.trunk_native_vlan is not None else 1
+    return vlan_segments(vids, native)
 
 
 def _l1_unclaimed_skip_note(label: str, ns_port: str, command: str) -> str:
@@ -2631,6 +2635,7 @@ def apply_parsed_configs(
                         model.subinterfaces.append(NSSubInterface(
                             device=label, parent_port=parent_port,
                             subif_port=ns_port, vlan_id=iface.access_vlan,
+                            native=iface.dot1q_native,
                         ))
                     if iface.has_ip():
                         if phys_claimed_by_l1:
@@ -3174,6 +3179,7 @@ def build_model(configs: Dict[str, ParsedConfig], cfg: Dict) -> Tuple[NSModel, L
     # the mirror `add portchannel_bulk` cannot hit "Port not found".
     po_mirror_skip_notes = synthesize_dummy_portchannel_mirrors(model)
     report.notes.extend(po_mirror_skip_notes)
+    apply_untag_consistency(model)
 
     # Step 8.6 (DESIGN.md 4.4.1, feature: waypoint-excluded area grouping):
     # AREA assignment, run HERE (after step 7.5's port-channel member links,

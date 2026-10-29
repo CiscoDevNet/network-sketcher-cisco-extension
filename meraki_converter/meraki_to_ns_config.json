@@ -45,8 +45,8 @@
         "sample": true
     },
     "ap_untagged_segment_name": {
-        "value": "untag",
-        "description": "FALLBACK native L2 segment name for an MR access point that has no upstream switch (e.g. attached straight to the MX). When the AP connects to a switch it instead REUSES that switch port's L2 segment name (e.g. 'Vlan1') so the two share one broadcast domain - a standalone name like 'untag' would form a separate domain and leave the AP isolated at L2. Tagged SSIDs always use their own 'Vlan<id>' segment. Only applies when ap_management_model is true.",
-        "sample": "untag"
+        "value": "Vlan1",
+        "description": "FALLBACK native VLAN name for an MR access point that has no upstream switch (e.g. attached straight to the MX). When the AP connects to a switch it instead uses that switch port's native VLAN (e.g. 'Vlan1'). When the uplink also carries VLAN-tagged SSIDs (a trunk) the native VLAN is written with the '_UNTAG_' suffix (e.g. 'Vlan1_UNTAG_', Network Sketcher RULE 9.5), so it connects to the untagged VLAN of the far end whatever its name. Tagged SSIDs always use their own 'Vlan<id>' segment. Only applies when ap_management_model is true.",
+        "sample": "Vlan1"
     }
 }

@@ -160,6 +160,7 @@ class NSSubInterface:
     parent_port: str                # 'GigabitEthernet 0/1'
     subif_port: str                 # 'GigabitEthernet 0/1.10'
     vlan_id: Optional[int] = None   # dot1q encapsulation VLAN, if any
+    native: bool = False            # 'encapsulation dot1Q N native' -> 'VlanN_UNTAG_'
 
 
 @dataclass

@@ -62,6 +62,7 @@ class ParsedInterface:
     access_vlan: Optional[int] = None
     trunk_native_vlan: Optional[int] = None
     trunk_allowed_vlans: List[int] = field(default_factory=list)
+    dot1q_native: bool = False          # sub-interface 'encapsulation dot1Q N native'
     ipv4: List[IPv4Addr] = field(default_factory=list)
     ipv4_secondary: List[IPv4Addr] = field(default_factory=list)
     ipv6: List[IPv6Addr] = field(default_factory=list)
@@ -413,9 +414,10 @@ def _consume_iface_line(stripped: str, iface: ParsedInterface) -> bool:
         return True
 
     # encapsulation dot1q X (sub-interfaces on IOS-XE)
-    m = re.match(r"^encapsulation\s+dot1q\s+(\d+)", stripped)
+    m = re.match(r"^encapsulation\s+dot1q\s+(\d+)(\s+native)?\b", stripped, re.IGNORECASE)
     if m:
         iface.access_vlan = int(m.group(1))  # used to derive l2_segment binding for sub-if
+        iface.dot1q_native = bool(m.group(2))
         return True
 
     m = re.match(r"^(?:ip\s+)?vrf\s+(?:member|forwarding)\s+(\S+)$", stripped)

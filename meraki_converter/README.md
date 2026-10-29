@@ -201,8 +201,9 @@ A Meraki MR is a **Layer 2 bridge** with a single management IP on its native
 that way (toggle `ap_management_model`):
 
 - the wired uplink (`GigabitEthernet 0/0`) carries the native L2 segment, plus
-  any VLAN-tagged SSID VLANs (so a tagging deployment renders as a trunk, an
-  untagged one as a single-segment access port);
+  any VLAN-tagged SSID VLANs (so a tagging deployment renders as a trunk whose
+  native VLAN is `Vlan<id>_UNTAG_`, an untagged one as a single-segment access
+  port);
 - a synthetic `Dummy_mgmt 0` management SVI is bound to the native segment and
   receives the AP's management IP (`lanIp`) **only when one exists** (null on the
   dormant sandbox devices, populated on a live org);
@@ -215,15 +216,21 @@ The management IP therefore lands on the SVI (correct for an L2 device), not on
 the physical port. Cameras (MV) and sensors (MT) keep the simpler model (`lanIp`
 on the physical uplink). Set `ap_management_model` to `false` to disable.
 
-> **Note — native L2 segment name follows the connected switch.** Even though an
-> MR's native VLAN is *untagged*, the converter does **not** invent a separate
-> name (e.g. `untag`) for it. A standalone name produces a separate Network
-> Sketcher broadcast domain that does not merge with the switch's native VLAN, so
-> the AP would appear isolated at L2. Instead the AP reuses the **exact L2 segment
-> name of the switch port it connects to** (`Vlan1` in the sandbox), so the AP
-> and its switch share one broadcast domain. `ap_untagged_segment_name` is only a
-> fallback for an AP that has no upstream switch (e.g. attached straight to the
-> MX). Also note NS stores an L1 port name as a single `type number` pair and
+> **Note — untagged (native) VLANs use `_UNTAG_` (Network Sketcher ver 3.1.2v
+> or later).** Network Sketcher marks the
+> untagged VLAN of a port with the `_UNTAG_` suffix (RULE 9.5): `Vlan1_UNTAG_`
+> is VLAN 1 carried untagged. Two `_UNTAG_` segments connect across a link
+> whatever their names, two tagged segments connect only when the names match,
+> and `Vlan1_UNTAG_` never connects to `Vlan1`. So the converter writes the
+> native VLAN of every switch trunk (`vlan` of the Dashboard port), of an AP
+> uplink that also carries tagged SSIDs, and of the MX LAN trunk (from
+> `appliance/ports`, when `dropUntaggedTraffic` is off) as `Vlan<id>_UNTAG_`.
+> An access port stays `Vlan<id>`, except where it faces another port's
+> `_UNTAG_` VLAN: there both ends become `_UNTAG_`, so the link keeps the
+> broadcast domain it had. The AP takes its native VLAN id from the switch port
+> it connects to (`Vlan1` in the sandbox); `ap_untagged_segment_name` (default
+> `Vlan1`) is only a fallback for an AP that has no upstream switch (e.g.
+> attached straight to the MX). Also note NS stores an L1 port name as a single `type number` pair and
 > strips inner spaces from the type token, so the converter pre-strips spaces in
 > the SSID name (`branch_office - wireless WiFi` → `branch_office-wirelessWiFi`)
 > to keep the L1-link and L2-segment names identical.
@@ -255,7 +262,7 @@ Each key has a `value` (used by the tool) plus `description`/`sample`.
 | `stencil_overrides` | `{}` | Map NS device name → NS Stencil Type. |
 | `color_overrides` | `{}` | Map NS device name → `[R,G,B]` cell colour. |
 | `ap_management_model` | `true` | Model each MR AP as an L2 bridge: native uplink segment (matching the connected switch), `Dummy_mgmt 0` management SVI (carries `lanIp` when present), and a physical `<SSID> <n>`/`wlan <n>` port per enabled SSID L1-linked to the switch. `false` puts `lanIp` on the physical port. |
-| `ap_untagged_segment_name` | `"untag"` | **Fallback** native L2 segment name for an MR AP that has *no* upstream switch (attached straight to the MX). When the AP connects to a switch it reuses the switch port's segment name instead, to share the broadcast domain. |
+| `ap_untagged_segment_name` | `"Vlan1"` | **Fallback** native VLAN name for an MR AP that has *no* upstream switch (attached straight to the MX). When the AP connects to a switch it uses the switch port's native VLAN instead. On an uplink that also carries tagged SSIDs it is written as `<name>_UNTAG_`. |
 
 ## Notes / limitations
 
@@ -293,6 +300,23 @@ meraki_converter/
 │   └── meraki_report.md
 └── src/                          (entry points: fetch_from_meraki.py, convert.py)
 ```
+
+## Changelog
+
+### Untagged (native) VLAN notation
+
+- **Native VLANs are written with `_UNTAG_`** (Network Sketcher RULE 9.5): the
+  native VLAN of a switch trunk, of an AP uplink trunk, and of the MX LAN trunk
+  (from `appliance/ports`) is `Vlan<id>_UNTAG_`. A port facing another port's
+  `_UNTAG_` VLAN with the same tagged name becomes `_UNTAG_` too, so existing
+  links keep their broadcast domain. The L2 segment names of those ports change
+  (`Vlan1` becomes `Vlan1_UNTAG_`). **Requires Network Sketcher ver 3.1.2v or
+  later** (the first version that reads `_UNTAG_`; an older one leaves native
+  VLANs unconnected).
+- **`ap_untagged_segment_name` defaults to `Vlan1`** (was `untag`).
+- **Fixed: a sub-interface VLAN binding is written `'Vlan<id>'`**, quoted. The
+  lower-case `vlan<id>` never joined the switch's `Vlan<id>` segment, and the
+  unquoted form is rejected by the Network Sketcher MCP command validator.
 
 ## Cisco Technologies
 

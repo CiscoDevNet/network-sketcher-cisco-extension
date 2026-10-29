@@ -97,7 +97,7 @@ def build_sdwan(
             attachments.append(Attachment(
                 device=label, port=port, overlay="sdwan", context=f"VPN {ctx.vrf}",
                 vrf=ctx.vrf, cidrs=ctx.cidrs, draw_device=label, draw_port=port,
-                lan_dummy=True,
+                lan_dummy=True, members=f.members.get(port, []),
             ))
     return attachments
 

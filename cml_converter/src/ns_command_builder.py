@@ -28,7 +28,7 @@ from __future__ import annotations
 import ipaddress
 import json
 from dataclasses import dataclass, field
-from typing import Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import AbstractSet, Dict, Iterable, List, Optional, Sequence, Tuple, Union
 
 from .topology_mapper import (
     NSDevice, NSL1Link, NSL2Segment, NSIPAssignment,
@@ -124,13 +124,15 @@ def cmd_add_l1_link_bulk(model: NSModel) -> Optional[str]:
     return f"add l1_link_bulk \"{payload}\""
 
 
-def cmd_rename_port_info_bulk(model: NSModel, unknown: bool = False) -> Optional[str]:
+def cmd_rename_port_info_bulk(
+    model: NSModel, unknown: Union[bool, AbstractSet[str]] = False,
+) -> Optional[str]:
     """Phase 2.5: set Speed/Duplex/Port_Type for all L1 ports of every device.
 
     POC defaults: 10Gbps full 10GBASE-SR for L3Switches, 1Gbps full 1000BASE-T
     for everything else. Endpoints get 1Gbps as well. Uses `_ALL_` per device.
     With ``unknown`` (the overlay, whose links are logical) every port is
-    Unknown/Unknown/Unknown.
+    Unknown/Unknown/Unknown; a set of names limits that to those devices.
     """
     if not model.devices:
         return None
@@ -138,7 +140,7 @@ def cmd_rename_port_info_bulk(model: NSModel, unknown: bool = False) -> Optional
     for d in model.devices.values():
         if d.stencil.stencil_type == NS_CLOUD:
             continue
-        if unknown:
+        if unknown is True or (not isinstance(unknown, bool) and d.name in unknown):
             spec = ("Unknown", "Unknown", "Unknown")
         elif d.stencil.stencil_type == "L3Switch":
             spec = ("10Gbps", "Full", "10GBASE-SR")
@@ -200,8 +202,11 @@ def cmd_add_vport_l2_direct_binding(model: NSModel) -> List[str]:
         if key in seen:
             continue
         seen.add(key)
+        # 'Vlan<id>' (not 'vlan<id>') so it matches the switch-side segment,
+        # quoted because the MCP command validator requires it.
+        name = f"Vlan{si.vlan_id}" + ("_UNTAG_" if getattr(si, "native", False) else "")
         out.append(
-            f"add vport_l2_direct_binding '{si.device}' '{si.subif_port}' vlan{si.vlan_id}"
+            f"add vport_l2_direct_binding '{si.device}' '{si.subif_port}' '{name}'"
         )
     return out
 
@@ -407,7 +412,9 @@ class CommandScript:
         return "\n".join(self.lines) + "\n"
 
 
-def build_command_script(model: NSModel, port_info_unknown: bool = False) -> CommandScript:
+def build_command_script(
+    model: NSModel, port_info_unknown: Union[bool, AbstractSet[str]] = False,
+) -> CommandScript:
     lines: List[str] = []
     counts: Dict[str, int] = {}
 

@@ -141,6 +141,13 @@ hardware name. The first list that matches wins.
 Add a word to the matching list to change where a name is drawn. No code
 change is required.
 
+## Changelog
+
+- **Fixed: a sub-interface VLAN binding is written `'Vlan<id>'`**, quoted
+  (`add vport_l2_direct_binding`). The lower-case, unquoted `vlan<id>` never
+  joined the switch's `Vlan<id>` segment and is rejected by the Network
+  Sketcher MCP command validator.
+
 ## Author
 
 Yusuke Ogawa - Architect, Cisco | CCIE#17583

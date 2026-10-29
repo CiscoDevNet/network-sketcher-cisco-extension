@@ -3,7 +3,8 @@
 """Join the EVPN, SD-WAN and L3VPN overlays into one model and lay it out.
 
 Each builder hands over its LAN-facing VRF / VPN ports as attachments. For
-every attachment the CML L1 link on that port is followed:
+every attachment the CML L1 link on that port (on each member port, for a
+``Bundle-Ether`` / ``Port-channel``) is followed:
 
 * to another overlay's attachment -- a handoff (for example a border leaf
   VRF port cabled to a cEdge Service VPN port): the two drawn ends are
@@ -17,8 +18,11 @@ every attachment the CML L1 link on that port is followed:
 * to nothing: an SD-WAN port goes to a gray per-Edge LAN dummy as in
   sdwan_converter; any other port is reported and left out.
 
-A link between two different site areas is never drawn (NS RULE 3); it is
-listed in the report instead.
+After that the devices the overlay did not draw are added as in the
+underlay (see ``overlay_underlay``): the rest of an overlay lab joins its
+areas, and a lab with no overlay keeps its underlay areas. A link between two
+different non-waypoint areas is never drawn (NS RULE 3); it is listed in the
+report instead.
 """
 
 from __future__ import annotations
@@ -37,6 +41,7 @@ from .overlay_l3vpn import build_l3vpn
 from .overlay_parser import OVERLAY_TYPES, OverlayFacts, detected_types, parse_all_overlays
 from .overlay_sdwan import build_sdwan
 from .overlay_sites import assign_overlay_areas, wan_area
+from .overlay_underlay import UnderlayCopier
 from .stencil_mapper import (
     NS_FIREWALL, NS_L3SWITCH, NS_ROUTER, NS_SWITCH, StencilMapping,
     model_is_external_connector,
@@ -54,6 +59,8 @@ class OverlayResult:
     found: List[str]                 # overlay types present in the configs
     drawn: List[str]                 # overlay types drawn (after --overlay)
     areas: Dict[str, str] = field(default_factory=dict)
+    overlay_labs: List[str] = field(default_factory=list)   # labs with an overlay
+    underlay_labs: List[str] = field(default_factory=list)  # labs copied from the underlay
 
 
 def _networks(cidrs: Iterable[str]) -> Set[Any]:
@@ -86,10 +93,17 @@ class _Stitcher:
         self.areas = areas
         self.lab_of = lab_of
         self.stencils = stencils
+        # Indexed by every CML port of the attachment (the members of a LAG).
         self.index: Dict[Tuple[str, str], Attachment] = {}
+        self.attachments: List[Attachment] = []
+        seen: Set[Tuple[str, str]] = set()
         for a in attachments:
-            self.index.setdefault((a.device, a.port), a)
-        self.attachments = list(self.index.values())
+            if (a.device, a.port) in seen:
+                continue
+            seen.add((a.device, a.port))
+            self.attachments.append(a)
+            for p in a.cml_ports():
+                self.index.setdefault((a.device, p), a)
         self.peers: Dict[Tuple[str, str], List[Tuple[str, str]]] = defaultdict(list)
         self.ports_of: Dict[str, List[str]] = defaultdict(list)
         for lk in l1_links:
@@ -143,9 +157,7 @@ class _Stitcher:
         if self.canvas.link(a[0], a[1], b[0], b[1]):
             return True
         if self.canvas.port_free(a[0], a[1]) and self.canvas.port_free(b[0], b[1]):
-            self.canvas.notes.append(
-                f"Not drawn ({why}): {a[0]} {a[1]} [{self.canvas.area_of(a[0])}] -- "
-                f"{b[0]} {b[1]} [{self.canvas.area_of(b[0])}] would cross areas (RULE 3).")
+            self.canvas.note_cross(why, a, b)
         return False
 
     def _handoff(self, a: Attachment, b_dev: str, b_port: str, b_ctx: str,
@@ -191,8 +203,8 @@ class _Stitcher:
         """Link ``a_end`` straight to ``q qp`` (no switch in between)."""
         b = self.index.get((q, qp))
         if b is not None:
-            self.done.add((q, qp))
-            ok = self._link(a_end, b.end(self.canvas), "handoff")
+            self.done.add((b.device, b.port))
+            ok = self._link(a_end, b.link_end(self.canvas, qp), "handoff")
             if self._differs(a, b):
                 self._handoff(a, b.device, b.port, b.context, b.cidrs, b.draw_device, ok)
             return
@@ -212,12 +224,12 @@ class _Stitcher:
             if port == sw_port or not self.canvas.port_free(sw, port):
                 continue
             for q, qp in self.peers.get((sw, port), []):
-                if (q, qp) == (a.device, a.port):
-                    continue
                 b = self.index.get((q, qp))
+                if b is a:
+                    continue
                 if b is not None:
-                    self.done.add((q, qp))
-                    if self._link(b.end(self.canvas), (sw, port), "LAN"):
+                    self.done.add((b.device, b.port))
+                    if self._link(b.link_end(self.canvas, qp), (sw, port), "LAN") and b not in members:
                         members.append(b)
                     continue
                 peer = self._attach_peer((sw, port), q, qp)
@@ -253,20 +265,26 @@ class _Stitcher:
             if key in self.done:
                 continue
             self.done.add(key)
-            far = self.peers.get(key, [])
-            if not far:
+            cml_ports = [p for p in a.cml_ports() if self.peers.get((a.device, p))]
+            if not cml_ports:
                 if a.lan_dummy:
-                    self._to_lan_dummy(a, a.end(self.canvas))
+                    self._to_lan_dummy(a, a.link_end(self.canvas, a.cml_ports()[0]))
                 else:
-                    self.canvas.notes.append(
+                    self.canvas.note(
                         f"{a.device} {a.port} ({a.context}) has no CML link and is not drawn.")
                 continue
-            a_end = a.end(self.canvas)
-            for q, qp in far:
-                if (q, qp) not in self.index and self._transparent(q):
-                    self._through_switch(a, a_end, q, qp)
-                else:
-                    self._connect(a, a_end, q, qp)
+            if a.members and a.draw_device != a.device and len(cml_ports) > 1:
+                self.canvas.note(
+                    f"{a.device} {a.port} ({a.context}): only member {cml_ports[0]} is linked "
+                    f"to {a.draw_device}; the other members are not drawn.")
+                cml_ports = cml_ports[:1]
+            for cml_port in cml_ports:
+                a_end = a.link_end(self.canvas, cml_port)
+                for q, qp in self.peers[(a.device, cml_port)]:
+                    if (q, qp) not in self.index and self._transparent(q):
+                        self._through_switch(a, a_end, q, qp)
+                    else:
+                        self._connect(a, a_end, q, qp)
 
 
 # ---------------------------------------------------------------------------
@@ -275,6 +293,8 @@ class _Stitcher:
 
 def _site_key(area: str, lab: str) -> Tuple[int, int, str]:
     tail = area[len(lab) + 1:] if area.startswith(lab + "-") else ""
+    if area.endswith("_wp_"):
+        return (3, 0, area)
     if tail.startswith("site") and tail[4:].isdigit():
         return (0, int(tail[4:]), area)
     if area == lab:
@@ -282,29 +302,176 @@ def _site_key(area: str, lab: str) -> Tuple[int, int, str]:
     return (1, 0, area)
 
 
-def layout(canvas: OverlayCanvas, lab_order: List[str]) -> None:
-    """Per lab, the WAN waypoint row above that lab's site areas."""
+def layout(
+    canvas: OverlayCanvas,
+    lab_order: List[str],
+    underlay_rows: Optional[List[List[str]]] = None,
+    underlay_area_lab: Optional[Dict[str, str]] = None,
+) -> None:
+    """Arrange the areas the way the underlay arranged its labs.
+
+    Each underlay area row is walked in order. A lab with no overlay keeps its
+    underlay areas where they were; an overlay lab's areas (sites, the lab
+    area, its waypoint areas) take the place of that lab's first underlay
+    area, and its WAN waypoint area goes on a row above. A lab the underlay
+    rows do not mention follows at the end, one lab per row.
+    """
+    underlay_rows = underlay_rows or []
+    underlay_area_lab = underlay_area_lab or {}
     by_lab: Dict[str, List[str]] = defaultdict(list)
     for area, lab in canvas.lab_of_area.items():
-        if any(canvas.rows[area].values()):
+        if area in canvas.fixed_grids or any(canvas.rows[area].values()):
             by_lab[lab].append(area)
-    labs = [l for l in lab_order if l in by_lab] + sorted(l for l in by_lab if l not in lab_order)
-    ordered_rows: List[List[str]] = []
-    for lab in labs:
-        areas = by_lab[lab]
+
+    def overlay_areas(lab: str) -> List[str]:
         wan = wan_area(lab)
-        if wan in areas:
-            ordered_rows.append([wan])
-        sites = sorted((a for a in areas if a != wan), key=lambda a: _site_key(a, lab))
-        if sites:
-            ordered_rows.extend(arrange_area_rows(sites))
+        return sorted((a for a in by_lab[lab] if a != wan and a not in canvas.fixed_grids),
+                      key=lambda a: _site_key(a, lab))
+
+    placed: Set[str] = set()       # fixed (underlay-copied) areas already in a row
+    placed_labs: Set[str] = set()  # overlay labs already in a row
+    ordered_rows: List[List[str]] = []
+
+    def emit(labs_in_row: List[str], row: List[str]) -> None:
+        wans = [wan_area(l) for l in labs_in_row if wan_area(l) in by_lab[l]]
+        if wans:
+            ordered_rows.extend(arrange_area_rows(wans))
+        if row:
+            ordered_rows.extend(arrange_area_rows(row))
+
+    for urow in underlay_rows:
+        row: List[str] = []
+        overlay_in_row: List[str] = []
+        for area in urow:
+            if area in canvas.fixed_grids:
+                if area not in placed:
+                    row.append(area)
+                    placed.add(area)
+                continue
+            lab = underlay_area_lab.get(area)
+            if lab is None or lab in placed_labs or not overlay_areas(lab):
+                continue
+            placed_labs.add(lab)
+            overlay_in_row.append(lab)
+            row.extend(overlay_areas(lab))
+        emit(overlay_in_row, row)
+
+    labs = [l for l in lab_order if l in by_lab] + sorted(l for l in by_lab if l not in lab_order)
+    for lab in labs:
+        rest = [a for a in by_lab[lab] if a in canvas.fixed_grids and a not in placed]
+        placed.update(rest)
+        if lab not in placed_labs and overlay_areas(lab):
+            placed_labs.add(lab)
+            emit([lab], overlay_areas(lab) + rest)
+        elif rest:
+            emit([], rest)
     canvas.model.areas = ordered_rows
     canvas.model.area_to_devices = {}
     for row in ordered_rows:
         for area in row:
-            grid = [names for _, names in sorted(canvas.rows[area].items()) if names]
+            if area in canvas.fixed_grids:
+                grid = [list(r) for r in canvas.fixed_grids[area]]
+            else:
+                grid = [names for _, names in sorted(canvas.rows[area].items()) if names]
             if grid:
                 canvas.model.area_to_devices[area] = grid
+
+
+# ---------------------------------------------------------------------------
+# Underlay part
+# ---------------------------------------------------------------------------
+
+ROW_UNDERLAY = ROW_HOST + 1   # underlay devices of an overlay lab start below the overlay rows
+
+
+def _add_underlay(
+    canvas: OverlayCanvas,
+    underlay: NSModel,
+    facts: Dict[str, OverlayFacts],
+    labels: List[str],
+    lab_of: Dict[str, str],
+    areas: Dict[str, str],
+    overlay_labs: Set[str],
+) -> Dict[str, str]:
+    """Draw everything the overlay did not, as in the underlay.
+
+    In an overlay lab, a device the overlay left out joins its overlay area
+    (an External Connector keeps its underlay waypoint area); an EVPN VTEP is
+    not drawn because its VRF-GW stands for it. A lab with no overlay is
+    copied with its underlay areas and grid. Then every underlay link whose
+    two ends are drawn is added, unless a port is taken or it would cross
+    areas. Returns ``{underlay area: lab}`` for the layout.
+    """
+    copier = UnderlayCopier(canvas, underlay)
+    grid_row: Dict[str, int] = {}
+    grid_col: Dict[str, int] = {}
+    for grid in underlay.area_to_devices.values():
+        for r, row in enumerate(grid):
+            for c, name in enumerate(row):
+                if name != "_AIR_":
+                    grid_row[name] = r
+                    grid_col[name] = c
+    area_lab = {d.area: lab_of.get(name, "lab") for name, d in underlay.devices.items()}
+
+    # Overlay rows already holding real devices from each (underlay area, underlay row).
+    overlay_row_of: Dict[Tuple[str, int], int] = {}
+    for name, d in canvas.model.devices.items():
+        if name in underlay.devices and name in grid_row:
+            key = (underlay.devices[name].area, grid_row[name])
+            overlay_row_of[key] = min(overlay_row_of.get(key, d.row), d.row)
+
+    vteps: Set[str] = set()
+    plain_areas: Dict[str, str] = {}
+    mixed_areas: Set[str] = set()
+    for label in labels:
+        if canvas.has(label) or label not in underlay.devices:
+            continue
+        lab = lab_of.get(label, "lab")
+        ud = underlay.devices[label]
+        if lab in overlay_labs:
+            f = facts.get(label)
+            if f is not None and f.evpn is not None:
+                vteps.add(label)
+                continue
+            if ud.area.endswith("_wp_") or model_is_external_connector(ud.stencil.model):
+                copier.copy_device(label, ud.area, lab, grid_row.get(label, 0))
+            else:
+                r = grid_row.get(label, 0)
+                row = overlay_row_of.get((ud.area, r), ROW_UNDERLAY + r)
+                area = areas.get(label, lab)
+                copier.copy_device(label, area, lab, row)
+                mixed_areas.add(area)
+        else:
+            copier.copy_device(label, ud.area, lab, grid_row.get(label, 0))
+            plain_areas[ud.area] = lab
+    for area in plain_areas:
+        canvas.fixed_grids[area] = [list(r) for r in underlay.area_to_devices.get(area, [])]
+    # A row of real devices follows the underlay's left-to-right order.
+    for area in mixed_areas:
+        for r, names in canvas.rows[area].items():
+            if names and all(n in grid_col for n in names):
+                names.sort(key=lambda n: grid_col[n])
+
+    for lk in underlay.l1_links:
+        a, b = (lk.a_device, lk.a_port), (lk.b_device, lk.b_port)
+        if not canvas.has(a[0]) or not canvas.has(b[0]):
+            other = a[0] if b[0] in vteps else b[0] if a[0] in vteps else None
+            if other and canvas.has(other):
+                vtep = b[0] if b[0] in vteps else a[0]
+                canvas.note(f"Not drawn (underlay): {other} -- {vtep}; the EVPN VTEP {vtep} "
+                            "is shown as its VRF-GW.")
+            continue
+        if not canvas.port_free(*a) or not canvas.port_free(*b):
+            continue
+        if canvas.crosses_areas(a[0], b[0]):
+            canvas.note_cross("underlay", a, b)
+            continue
+        canvas.link(a[0], a[1], b[0], b[1])
+        canvas.counts["underlay_links"] += 1
+        for dev, port in (a, b):
+            if dev not in canvas.underlay_devices:
+                copier.copy_port(dev, port)
+    return area_lab
 
 
 # ---------------------------------------------------------------------------
@@ -313,7 +480,7 @@ def layout(canvas: OverlayCanvas, lab_order: List[str]) -> None:
 
 def build_overlay_model(
     nodes: List[Dict[str, Any]],
-    l1_links: List[NSL1Link],
+    underlay: NSModel,
     stencils: Dict[str, StencilMapping],
     raw_configs: Dict[str, str],
     parsed_configs: Dict[str, Any],
@@ -322,8 +489,12 @@ def build_overlay_model(
 ) -> OverlayResult:
     """The integrated overlay of every lab in ``nodes``.
 
-    ``wanted`` narrows the overlay types drawn (None or ``auto`` = all found).
+    ``underlay`` is the model ``build_ns_model`` made for the same nodes; its
+    L1 links drive the overlay, and the devices the overlay does not draw are
+    copied from it. ``wanted`` narrows the overlay types drawn (None or
+    ``auto`` = all found).
     """
+    l1_links = underlay.l1_links
     facts = parse_all_overlays(raw_configs, parsed_configs)
     found = detected_types(facts.values())
     want = [t for t in OVERLAY_TYPES if not wanted or "auto" in wanted or t in wanted]
@@ -360,11 +531,18 @@ def build_overlay_model(
                                taken={(a.device, a.port) for a in evpn})
     _Stitcher(canvas, facts, areas, lab_of, stencils, l1_links, attachments).run()
 
+    overlay_labs = {lab_of[label] for label, f in facts.items() if f.types() and label in lab_of}
+    area_lab = _add_underlay(canvas, underlay, facts, labels, lab_of, areas, overlay_labs)
+
     pruned = canvas.prune_missing_ports()
     if pruned:
-        canvas.notes.append(f"{pruned} IP / VRF / L2 item(s) dropped because their port was not drawn.")
-    layout(canvas, lab_order)
-    return OverlayResult(canvas.model, canvas, facts, found, drawn, areas)
+        canvas.note(f"{pruned} IP / VRF / L2 item(s) dropped because their port was not drawn.")
+    layout(canvas, lab_order, underlay.areas, area_lab)
+    plain_labs = {canvas.lab_of_area[a] for a in canvas.fixed_grids if a in canvas.lab_of_area}
+    result = OverlayResult(canvas.model, canvas, facts, found, drawn, areas)
+    result.overlay_labs = [l for l in lab_order if l in overlay_labs]
+    result.underlay_labs = [l for l in lab_order if l in plain_labs and l not in overlay_labs]
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -411,6 +589,25 @@ def write_overlay_report(path: Any, result: OverlayResult, not_extracted: List[s
         lines.append("`confirmed`: both ports are in the same subnet. `inferred`: they are cabled "
                      "together in CML but the subnets differ or one side has no IP.")
     else:
+        lines.append("None.")
+    lines.append("")
+    lines.append("## Drawn as in the underlay")
+    lines.append("")
+    if result.underlay_labs:
+        lines.append("Labs with no overlay, copied from the underlay: "
+                     + ", ".join(result.underlay_labs) + ".")
+        lines.append("")
+    overlay_labs = set(result.overlay_labs)
+    in_overlay_labs = sorted(
+        name for name in result.canvas.underlay_devices
+        if result.canvas.lab_of_area.get(result.model.devices[name].area) in overlay_labs
+    )
+    if in_overlay_labs:
+        lines.append("Devices of an overlay lab that take no part in the overlay, drawn with their "
+                     "underlay ports, addresses and links:")
+        lines.append("")
+        lines.extend(f"- {name} [{result.model.devices[name].area}]" for name in in_overlay_labs)
+    if not result.underlay_labs and not in_overlay_labs:
         lines.append("None.")
     lines.append("")
     lines.append("## Areas")

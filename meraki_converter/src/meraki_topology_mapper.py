@@ -30,6 +30,7 @@ from .ns_model import (
     NSDevice, NSIPAssignment, NSL1Link, NSL2Segment, NSModel, NSPortChannel,
     NSVirtualPort, build_area_layout, normalise_port_name,
 )
+from .untag import apply_untag_consistency, untag, vlan_segments
 
 # RULE 0 tier rows per NS stencil type.
 _ROW_BY_STENCIL = {
@@ -110,7 +111,7 @@ def build_model(
     include_clients = cfg.get("include_clients", False)
     color_overrides = cfg.get("color_overrides") or {}
     ap_mgmt_model = cfg.get("ap_management_model", True)
-    untag_name = cfg.get("ap_untagged_segment_name") or "untag"
+    untag_name = cfg.get("ap_untagged_segment_name") or "Vlan1"
 
     inc = set(cfg.get("network_include") or [])
     exc = set(cfg.get("network_exclude") or [])
@@ -434,9 +435,10 @@ def build_model(
                 native_seg = ap_native_seg.get(leaf.serial, untag_name)
                 ssid_ports = _ap_ssid_ports(detail, native_seg)
                 tagged = sorted({seg for _, seg in ssid_ports if seg != native_seg})
-                # Wired uplink: native segment (+ tagged SSID VLANs = trunk).
-                model.l2_segments_phys.append(
-                    NSL2Segment(ns, port, [native_seg, *tagged]))
+                # Wired uplink: native segment (+ tagged SSID VLANs = trunk,
+                # where the native one is untagged).
+                uplink = [untag(native_seg), *tagged] if tagged else [native_seg]
+                model.l2_segments_phys.append(NSL2Segment(ns, port, uplink))
                 counts["l2_segments"] += 1
                 # Management SVI on the native segment, carrying lanIp if present.
                 model.virtual_ports.append(NSVirtualPort(ns, _AP_MGMT_SVI))
@@ -473,6 +475,8 @@ def build_model(
     caveats.extend(_annotate_ha_and_uplinks(export, name_of, model))
     # AutoVPN site-to-site overlay (spoke -> hub) + BGP AS annotation.
     caveats.extend(_add_vpn_links(export, name_of, model, counts))
+
+    apply_untag_consistency(model)
 
     # Area layout (tier-based; Meraki carries no canvas coordinates).
     model.areas, model.area_to_devices = build_area_layout(
@@ -568,6 +572,9 @@ def _add_appliance_l3(model: NSModel, gw_name: str, lan_port: str,
                 model.ip_assignments.append(NSIPAssignment(gw_name, svi, cidrs))
                 counts["ip_assignments"] += 1
             trunk_vlans.append(f"Vlan{vid}")
+        native = _appliance_native_vlan(detail)
+        if native is not None:
+            trunk_vlans = [untag(v) if v == f"Vlan{native}" else v for v in trunk_vlans]
         if trunk_vlans:
             model.l2_segments_phys.append(NSL2Segment(gw_name, lan_port, trunk_vlans))
             counts["l2_segments"] += 1
@@ -945,6 +952,25 @@ def _network_vlan_universe(
     return sorted(vlans) or [1]
 
 
+def _appliance_native_vlan(detail: Dict[str, Any]) -> Optional[int]:
+    """Native VLAN of the MX LAN trunk from ``appliance/ports``, or None.
+
+    The first enabled trunk port that accepts untagged traffic gives it; a
+    port with ``dropUntaggedTraffic`` has no native VLAN. Without that data
+    the untagged VLAN follows the switch it is cabled to.
+    """
+    for p in detail.get("appliancePorts") or []:
+        if not isinstance(p, dict) or not p.get("enabled", True):
+            continue
+        if str(p.get("type")) != "trunk" or p.get("dropUntaggedTraffic"):
+            continue
+        try:
+            return int(p.get("vlan"))
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
 def _port_native(port: Optional[Dict[str, Any]]) -> int:
     """A switch port's native (untagged) VLAN id, defaulting to 1."""
     try:
@@ -973,4 +999,5 @@ def _port_vlans(port: Dict[str, Any],
     if allowed is None:  # 'all' -> the network's real VLANs
         allowed = list(universe or [native])
     vids = sorted({native, *allowed})[:_TRUNK_VLAN_CAP]
-    return [f"Vlan{v}" for v in vids]
+    # A trunk's native VLAN is untagged (RULE 9.5 '_UNTAG_').
+    return vlan_segments(vids, native)

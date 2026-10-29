@@ -426,6 +426,13 @@ Every key is `{value, description, sample}`; only `value` is read. Key options:
 `apic_uplinks_per_leaf`, `vlan_base` (first synthetic BD VLAN id),
 `max_endpoints_per_epg`, and `emit_bidirectional_flows`.
 
+## Changelog
+
+- **Fixed: a sub-interface VLAN binding is written `'Vlan<id>'`**, quoted
+  (`add vport_l2_direct_binding`). The lower-case, unquoted `vlan<id>` never
+  joined the switch's `Vlan<id>` segment and is rejected by the Network
+  Sketcher MCP command validator.
+
 ## Author
 
 Yusuke Ogawa - Architect, Cisco | CCIE#17583

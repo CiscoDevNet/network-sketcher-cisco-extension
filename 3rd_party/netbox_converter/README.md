@@ -298,6 +298,21 @@ cleanly and generates the full diagram set.
 
 ---
 
+## Changelog
+
+### Untagged (native) VLAN notation
+
+- **Native VLANs are written with `_UNTAG_`** (Network Sketcher RULE 9.5): on a
+  `tagged` / `tagged-all` port the `untagged_vlan` is `Vlan<vid>_UNTAG_`. An
+  access port facing another port's `_UNTAG_` VLAN with the same tagged name
+  becomes `_UNTAG_` too, so the link keeps its broadcast domain. **Requires
+  Network Sketcher ver 3.1.2v or later** (the first version that reads
+  `_UNTAG_`; an older one leaves native VLANs unconnected).
+- **Fixed: a sub-interface VLAN binding is written `'Vlan<id>'`**, quoted, so it
+  joins the switch's `Vlan<id>` segment and passes the MCP command validator.
+
+---
+
 ## Author
 
 Yusuke Ogawa - Architect, Cisco | CCIE#17583

@@ -73,6 +73,7 @@ class OverlayFacts:
     sdwan: Optional[SdwanFacts] = None
     l3vpn: Optional[L3vpnFacts] = None
     ports: Dict[str, PortContext] = field(default_factory=dict)
+    members: Dict[str, List[str]] = field(default_factory=dict)  # LAG port -> member ports
 
     def types(self) -> List[str]:
         return [t for t in OVERLAY_TYPES if getattr(self, t) is not None]
@@ -98,6 +99,27 @@ def _port_contexts(parsed: ParsedConfig) -> Dict[str, PortContext]:
             cidrs=list(iface.all_cidrs()), access_vlan=iface.access_vlan,
         )
     return out
+
+
+def _lag_members(parsed: ParsedConfig) -> Dict[str, List[str]]:
+    """``{'Bundle-Ether 1': ['GigabitEthernet 0/0/0/1'], ...}`` from ``channel-group`` / ``bundle id``.
+
+    The logical name is the one the underlay gives the port-channel, so the
+    IP and VRF stay on the same port in both diagrams.
+    """
+    logical: Dict[int, str] = {}
+    members: Dict[int, List[str]] = {}
+    for iface in parsed.interfaces.values():
+        if iface.kind == "portchannel":
+            m = re.search(r"(\d+)$", iface.name)
+            if m:
+                logical[int(m.group(1))] = _ns_port(iface.name)
+        elif iface.kind in ("physical", "subif") and iface.channel_group is not None:
+            members.setdefault(iface.channel_group, []).append(_ns_port(iface.name))
+    return {
+        logical.get(group, f"Port-channel {group}"): sorted(set(ports))
+        for group, ports in members.items()
+    }
 
 
 def _children(body: List[str]) -> List[Tuple[str, List[str]]]:
@@ -343,6 +365,7 @@ def parse_overlay(device: str, raw_text: str, parsed: ParsedConfig) -> OverlayFa
     blocks = _top_blocks((raw_text or "").splitlines())
     facts = OverlayFacts(device=device, os_family=parsed.os_family)
     facts.ports = _port_contexts(parsed)
+    facts.members = _lag_members(parsed)
     facts.evpn = _parse_evpn(blocks, parsed)
     facts.sdwan = _parse_sdwan(blocks, parsed)
     if facts.sdwan is None:

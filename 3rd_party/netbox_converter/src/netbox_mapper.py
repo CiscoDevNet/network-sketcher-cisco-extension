@@ -42,6 +42,7 @@ from .ns_model import (
     NSDevice, NSIPAssignment, NSL1Link, NSL2Segment, NSModel,
     NSPortChannel, NSVirtualPort, build_area_layout, normalise_port_name,
 )
+from .untag import apply_untag_consistency, vlan_segments
 
 # Shared-palette light gray: "inferred / external / not observed reality".
 # Only forced onto synthesised dummy_stub_* placeholders (see module docstring).
@@ -499,8 +500,10 @@ def build_model(data: NetboxData,
                 vids.append(tv["vid"])
         if not vids:
             continue
+        # On a tagged port the untagged VLAN is the native one (RULE 9.5 '_UNTAG_').
+        native = unt["vid"] if mode != "access" and unt and unt.get("vid") is not None else None
         model.l2_segments_phys.append(
-            NSL2Segment(device=dev_name, port=port, vlans=[f"Vlan{v}" for v in vids]))
+            NSL2Segment(device=dev_name, port=port, vlans=vlan_segments(vids, native)))
         if mode == "access":
             report.l2_access += 1
         else:
@@ -541,6 +544,7 @@ def build_model(data: NetboxData,
     # crosses an area (RULE 3 holds by construction). build_area_layout buckets
     # each area's devices by row (= offline tier) and orders columns to
     # minimise link crossings.
+    apply_untag_consistency(model)
     model.areas, model.area_to_devices = build_area_layout(model.devices, model.l1_links)
 
     if report.wan_waypoint_links:
