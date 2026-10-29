@@ -155,6 +155,10 @@ def fetch_model(client: NetboxClient,
 
     for label, path, paginated in _COLLECTIONS:
         params = site_params if (label in site_scoped and site_params) else None
+        if label == "devices":
+            # Rendered config contexts can hold SNMP communities, TACACS keys
+            # and similar; the converter never reads them.
+            params = dict(params or {}, exclude="config_context")
         try:
             if paginated:
                 data = client.get_list(path, params)
@@ -169,6 +173,30 @@ def fetch_model(client: NetboxClient,
         print(f"  {label}: {n}", file=sys.stderr)
 
     return out
+
+
+_FREE_FORM_KEYS = ("config_context", "local_context_data", "custom_fields")
+
+
+def strip_secrets(doc: Dict[str, Any]) -> int:
+    """Remove config contexts, local context data and custom fields.
+
+    These free-form fields are where NetBox users commonly keep SNMP
+    communities, TACACS/RADIUS keys and other secrets. The converter reads
+    none of them. Returns how many values were removed.
+    """
+    removed = 0
+    for key, value in doc.items():
+        if key == "_meta" or not isinstance(value, list):
+            continue
+        for obj in value:
+            if not isinstance(obj, dict):
+                continue
+            for field in _FREE_FORM_KEYS:
+                if field in obj:
+                    del obj[field]
+                    removed += 1
+    return removed
 
 
 def probe_access(client: NetboxClient, status: Any) -> None:
@@ -245,6 +273,7 @@ def main(argv: Optional[list] = None) -> int:
         return 0
 
     doc = fetch_model(client, site_filter=args.site)
+    strip_secrets(doc)
 
     with open(args.out, "w", encoding="utf-8") as fh:
         json.dump(doc, fh, indent=1, ensure_ascii=False)

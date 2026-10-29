@@ -218,6 +218,33 @@ def fetch_model(client: CatcClient, with_endpoints: bool = False,
     return out
 
 
+_SSID_SECRET_KEYS = frozenset({"passphrase", "psk", "sharedsecret", "secret"})
+
+
+def _drop_keys(obj: Any, names: frozenset) -> int:
+    """Remove every key whose lower-cased name is in ``names``, at any depth."""
+    removed = 0
+    if isinstance(obj, dict):
+        for key in [k for k in obj if str(k).lower() in names]:
+            del obj[key]
+            removed += 1
+        for value in obj.values():
+            removed += _drop_keys(value, names)
+    elif isinstance(obj, list):
+        for item in obj:
+            removed += _drop_keys(item, names)
+    return removed
+
+
+def strip_secrets(doc: Dict[str, Any]) -> int:
+    """Remove SSID passphrases (including multi-PSK entries) from an export.
+
+    The converter reads only each SSID's name and VLAN, so the passphrase must
+    not reach the file. Returns how many values were removed.
+    """
+    return _drop_keys(doc.get("ssids") or [], _SSID_SECRET_KEYS)
+
+
 def main(argv: Optional[list] = None) -> int:
     p = argparse.ArgumentParser(
         description="Pull a Cisco Catalyst Center / DNA Center model over the Intent REST API (read-only).",
@@ -272,6 +299,9 @@ def main(argv: Optional[list] = None) -> int:
         print(f"[ERROR] fetch failed: {exc}", file=sys.stderr)
         return 1
 
+    removed = strip_secrets(doc)
+    if removed:
+        print(f"[ok] removed {removed} SSID secret value(s) from the export", file=sys.stderr)
     with open(args.out, "w", encoding="utf-8") as fh:
         json.dump(doc, fh, indent=1, ensure_ascii=False)
     ndev = len(doc.get("devices", []))

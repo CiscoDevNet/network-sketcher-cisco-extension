@@ -793,6 +793,9 @@ def _place_columns(
 # excessively sparse canvas.
 _COORD_CELL_DENSITY = 3.0
 
+# CML canvas heights (px) closer than this belong to the same visual row.
+_Y_BAND_TOLERANCE = 20.0
+
 
 def _place_by_coordinates(devs: List[NSDevice]) -> Optional[List[List[str]]]:
     """Lay out one area's devices on a discrete grid mirroring their CML
@@ -842,6 +845,22 @@ def _place_by_coordinates(devs: List[NSDevice]) -> Optional[List[List[str]]]:
     cols = max(1, round(math.sqrt(cells * aspect)))
     rows = max(1, round(math.sqrt(cells / aspect)))
 
+    # A wide, shallow canvas rounds ``rows`` down below the number of distinct
+    # heights, which would put a node drawn above another on the same row.
+    # Then each height band gets its own row instead.
+    bands: List[float] = []
+    for y in sorted(set(ys)):
+        if not bands or y - bands[-1] > _Y_BAND_TOLERANCE:
+            bands.append(y)
+    by_band = rows < len(bands)
+    if by_band:
+        rows = len(bands)
+
+    def _row(y: float) -> int:
+        if by_band:
+            return max(i for i, start in enumerate(bands) if y >= start)
+        return _bin(y, ymin, yspan, rows)
+
     def _bin(v: float, lo: float, span: float, k: int) -> int:
         if span <= 0:
             return 0
@@ -851,7 +870,7 @@ def _place_by_coordinates(devs: List[NSDevice]) -> Optional[List[List[str]]]:
 
     # Deterministic placement order: top→bottom, then left→right, then name.
     for d in sorted(devs, key=lambda d: (float(d.y), float(d.x), d.name)):  # type: ignore[arg-type]
-        r = _bin(float(d.y), ymin, yspan, rows)   # type: ignore[arg-type]
+        r = _row(float(d.y))   # type: ignore[arg-type]
         c = _bin(float(d.x), xmin, xspan, cols)   # type: ignore[arg-type]
         if grid[r][c] is None:
             grid[r][c] = d.name
@@ -1137,8 +1156,11 @@ def apply_parsed_configs(
                 portchannel_name=pc_name,
             ))
 
-        # Routing summary -> stored on device for assess.py.
-        if cfg.routing_summary_lines:
+        # Routing summary for Attribute-D: the short items when any were
+        # recognised, otherwise the head of the routing blocks.
+        if getattr(cfg, "routing_summary", None):
+            model.devices[label].routing_attribute = " | ".join(cfg.routing_summary)
+        elif cfg.routing_summary_lines:
             model.devices[label].routing_attribute = "\n".join(cfg.routing_summary_lines[:30])
 
         stats[label] = st

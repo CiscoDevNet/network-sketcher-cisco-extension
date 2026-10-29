@@ -911,9 +911,19 @@ def _extract_interfaces_sectionwise(
     ``_consume_iface_line`` until a blank line, a ``!`` separator, or a new
     top-level stanza is reached. This is independent of indentation, so it
     works for both normally-indented configs and flattened dumps.
+
+    An ``interface`` line indented deeper than the shallowest ``interface``
+    line sits inside a routing block (``router isis`` / ``router ospf`` /
+    ``sdwan``) and is not an interface definition, so it is skipped. A name
+    seen twice is read into the same interface rather than replacing it.
     """
     lines = raw_text.splitlines()
     n = len(lines)
+    top_indent = min(
+        (len(line) - len(line.lstrip()) for line in lines
+         if re.match(r"^\s*interface\s+\S", line)),
+        default=0,
+    )
     i = 0
     while i < n:
         s = lines[i].strip()
@@ -923,13 +933,16 @@ def _extract_interfaces_sectionwise(
         if not m:
             i += 1
             continue
+        if len(lines[i]) - len(lines[i].lstrip()) > top_indent:
+            i += 1
+            continue
         name = m.group(1)
         # Skip "interface range ..." group commands — they are bulk editors, not
         # a single addressable port, and never carry their own IP.
         if re.match(r"^range\b", name, re.IGNORECASE):
             i += 1
             continue
-        iface = ParsedInterface(name=name, kind=_iface_kind(name))
+        iface = parsed.interfaces.get(name) or ParsedInterface(name=name, kind=_iface_kind(name))
         i += 1
         pending_hsrp_group: Optional[str] = None  # NX-OS nested "hsrp N" block (see above)
         while i < n:
@@ -1151,6 +1164,12 @@ def _extract_bgp(parsed: ParsedConfig, raw_text: str) -> None:
     ``_extract_interfaces_sectionwise()``. Inert for classic IOS/IOS-XE/NX-OS
     input, which never emits a bare ``neighbor <ip>`` line without a
     same-line ``remote-as``.
+
+    In an indented config the block is every line indented deeper than
+    ``router bgp``, so the nested `` !`` that closes each IOS-XR
+    address-family and neighbor (and each IOS address-family) does not end
+    it. A flattened dump, where the block is not indented, still ends at the
+    first ``!`` or the next top-level stanza.
     """
     lines = raw_text.splitlines()
     n = len(lines)
@@ -1160,7 +1179,12 @@ def _extract_bgp(parsed: ParsedConfig, raw_text: str) -> None:
         m = _BGP_BLOCK_RE.match(s)
         if m:
             parsed.local_asn = m.group(1)
+            block_indent = _indent_of(lines[i])
             i += 1
+            following = next((l for l in lines[i:] if l.strip()), "")
+            if _indent_of(following) > block_indent:
+                i = _scan_indented_bgp(parsed, lines, i, block_indent)
+                continue
             pending_neighbor_ip: Optional[str] = None
             while i < n:
                 cs = lines[i].strip()
@@ -1191,6 +1215,47 @@ def _extract_bgp(parsed: ParsedConfig, raw_text: str) -> None:
                 i += 1
             continue
         i += 1
+
+
+def _indent_of(line: str) -> int:
+    return len(line) - len(line.lstrip())
+
+
+def _scan_indented_bgp(parsed: ParsedConfig, lines: List[str], i: int, block_indent: int) -> int:
+    """Read neighbours from an indented ``router bgp`` block starting at ``i``.
+
+    Returns the index of the first line after the block. A bare IOS-XR
+    ``neighbor <ip>`` takes its ``remote-as`` only from a line nested under it.
+    """
+    n = len(lines)
+    pending_ip: Optional[str] = None
+    pending_indent = -1
+    while i < n:
+        raw = lines[i]
+        cs = raw.strip()
+        if not cs:
+            i += 1
+            continue
+        indent = _indent_of(raw)
+        if indent <= block_indent:
+            break
+        if pending_ip is not None and indent <= pending_indent:
+            pending_ip = None
+        m2 = _BGP_NEIGHBOR_RE.match(cs)
+        if m2:
+            parsed.bgp_peers.append(BgpPeer(neighbor_ip=m2.group(1), remote_as=m2.group(2)))
+            pending_ip = None
+        elif pending_ip is not None and _IOSXR_BGP_REMOTE_AS_RE.match(cs):
+            parsed.bgp_peers.append(BgpPeer(
+                neighbor_ip=pending_ip, remote_as=_IOSXR_BGP_REMOTE_AS_RE.match(cs).group(1)))
+            pending_ip = None
+        else:
+            m4 = _IOSXR_BGP_NEIGHBOR_BARE_RE.match(cs)
+            if m4:
+                pending_ip = m4.group(1)
+                pending_indent = indent
+        i += 1
+    return i
 
 
 # ---------------------------------------------------------------------------

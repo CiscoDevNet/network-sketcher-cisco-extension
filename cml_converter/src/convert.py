@@ -33,6 +33,7 @@ import argparse
 import csv
 import json
 import pathlib
+import re
 import sys
 from collections import defaultdict
 from typing import Any, Dict, List, Optional, Set, Tuple
@@ -283,6 +284,37 @@ def _extract_configs_from_nodes(nodes: list) -> Dict[str, str]:
     return configs
 
 
+# CML's day-0 template keeps this hostname until the lab's configs are extracted.
+_DAY0_HOSTNAME_RE = re.compile(r"^\s*hostname\s+inserthostname-here\s*$", re.MULTILINE)
+
+
+def _has_l2_l3(parsed: Any) -> bool:
+    for iface in (getattr(parsed, "interfaces", None) or {}).values():
+        if iface.has_ip() or iface.access_vlan or iface.trunk_allowed_vlans:
+            return True
+    return False
+
+
+def split_day0_configs(
+    raw_configs: Dict[str, str], parsed_configs: Dict[str, Any],
+) -> Tuple[Dict[str, Any], List[str]]:
+    """Separate configs that are still CML's day-0 template.
+
+    Returns ``(parsed configs to use, labels whose config was never
+    extracted)``. CML swaps ``inserthostname-here`` for the node label at
+    boot, so a day-0 config someone edited still carries it; a config counts
+    as not extracted only when it also yields no address and no VLAN.
+    """
+    kept: Dict[str, Any] = {}
+    day0: List[str] = []
+    for label, parsed in parsed_configs.items():
+        if _DAY0_HOSTNAME_RE.search(raw_configs.get(label) or "") and not _has_l2_l3(parsed):
+            day0.append(label)
+        else:
+            kept[label] = parsed
+    return kept, sorted(day0)
+
+
 def _rekey_configs(configs: Dict[str, str], nodes: list) -> Dict[str, str]:
     """Point config text at the label a renamed device now uses."""
     rekeyed: Dict[str, str] = {}
@@ -330,6 +362,7 @@ def _write_parse_report(
     nodes: list,
     parsed_configs: Dict[str, Any],
     skipped_ports: Optional[List[Tuple[str, str, str]]] = None,
+    not_extracted: Optional[List[str]] = None,
 ) -> None:
     node_labels = {str(n.get("label", "")) for n in nodes}
     covered = set(parsed_configs.keys()) & node_labels
@@ -338,6 +371,10 @@ def _write_parse_report(
         "# CML → NS Conversion — Parse Report\n",
         f"**Topology devices**: {len(node_labels)}  ",
         f"**Configs provided**: {len(parsed_configs)}  ",
+    ]
+    if not_extracted:
+        lines.append(f"**Configs not extracted (CML day-0 template)**: {len(not_extracted)}  ")
+    lines += [
         f"**Coverage**: {len(covered)}/{len(node_labels)} "
         f"({100 * len(covered) // max(len(node_labels), 1)}%)\n",
         "## Per-device statistics\n",
@@ -368,6 +405,15 @@ def _write_parse_report(
         ]
         for device, port, what in skipped_ports:
             lines.append(f"| {device} | {port} | {what} |")
+    if not_extracted:
+        lines += [
+            "",
+            "## Config not extracted\n",
+            "These nodes still hold CML's day-0 template (`hostname inserthostname-here`), "
+            "so only their links are drawn. Run **Extract Configs** on the lab in CML, "
+            "then fetch or export it again.\n",
+        ]
+        lines += [f"- {label}" for label in not_extracted]
     report_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     print(f"  parse_report.md  → {report_path}")
 
@@ -475,6 +521,10 @@ def main(argv: Optional[list] = None) -> int:
         else:
             print("         source: none (no --configs dir, no embedded configs in YAML)")
     parsed_configs = parse_all(raw_configs) if raw_configs else {}
+    parsed_configs, not_extracted = split_day0_configs(raw_configs, parsed_configs)
+    if not_extracted:
+        print(f"  [WARN] {len(not_extracted)} node(s) still have CML's day-0 config "
+              f"(not extracted in CML), so no L2/L3 is read for them. See parse_report.md.")
     print(f"         parsed {len(parsed_configs)} config(s)")
 
     # ------------------------------------------------------------------
@@ -514,7 +564,7 @@ def main(argv: Optional[list] = None) -> int:
     if script.dropped_ips:
         print(f"  [WARN] {len(script.dropped_ips)} IPv6 address(es) left out because "
               f"Network Sketcher does not accept them. See parse_report.md.")
-    _write_parse_report(out_dir, parse_stats, nodes, parsed_configs, skipped)
+    _write_parse_report(out_dir, parse_stats, nodes, parsed_configs, skipped, not_extracted)
 
     print("\n[Done] All outputs written.")
     return 0

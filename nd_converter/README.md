@@ -222,6 +222,10 @@ Retrieval is **read-only** — it never modifies the fabric. It logs in
 pulls the switch inventory, the observed links, and the VRF / Network overlay.
 Credentials come from a CLI arg or the `ND_PASSWORD` env var (never hard-coded);
 NDFC self-signed certs are accepted by default (`--verify-tls` to enforce).
+Before the file is written, authentication keys and passwords (for example
+`BGP_AUTH_KEY`, `OSPF_AUTH_KEY`, `MACSEC_KEY_STRING`, `bgpPassword` inside
+`vrfTemplateConfig`) and free-text config (`*_CONF`, `extra_config`,
+`freeformConfig`) are set to `""`. The converter reads none of them.
 
 Use `--probe` to authenticate and read only the fabrics catalog, without
 collecting per-fabric details or writing an export.

@@ -130,6 +130,20 @@ def choose_labs(catalog: List[tuple], wanted: Optional[List[str]]) -> List[tuple
     return chosen
 
 
+def strip_credentials(nodes: List[Any]) -> int:
+    """Remove each node's pyATS block (username / password / enable_password).
+
+    The converter never reads it, and it must not reach the export file.
+    Returns how many nodes had one.
+    """
+    removed = 0
+    for node in nodes:
+        if isinstance(node, dict) and "pyats" in node:
+            del node["pyats"]
+            removed += 1
+    return removed
+
+
 def fetch_labs(client: CmlClient, wanted: Optional[List[str]] = None) -> Dict[str, Any]:
     """Download every selected lab's topology. Read-only."""
     listing = client._request(_LABS_PATH)
@@ -156,6 +170,7 @@ def fetch_labs(client: CmlClient, wanted: Optional[List[str]] = None) -> Dict[st
         links = topo.get("links") or []
         if not isinstance(nodes, list) or not isinstance(links, list):
             raise RuntimeError(f"topology for {title} has no node/link lists")
+        strip_credentials(nodes)
         meta = meta_by_id.get(lid) or {}
         labs_out.append({
             "id": lid,

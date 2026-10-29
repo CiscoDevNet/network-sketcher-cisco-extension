@@ -96,7 +96,9 @@ python -m meraki_converter.src.convert \
 ```
 
 `fetch_from_meraki` issues only GET requests — it never modifies the org.
-With `--probe`, it reads only the selected organization object to verify the
+Before the file is written it removes each SSID's `psk`, any RADIUS server
+`secret`, and AutoVPN BGP neighbour `authentication`; the converter reads none
+of them. With `--probe`, it reads only the selected organization object to verify the
 API key and organization access.
 
 ### Getting a Meraki API key (read-only is sufficient)

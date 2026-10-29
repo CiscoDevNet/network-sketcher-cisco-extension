@@ -23,7 +23,7 @@ from __future__ import annotations
 import ipaddress
 import re
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Set
+from typing import Dict, List, Optional, Set, Tuple
 
 
 # ---------------------------------------------------------------------------
@@ -98,6 +98,7 @@ class ParsedConfig:
     vrfs: Set[str] = field(default_factory=set)
     interfaces: Dict[str, ParsedInterface] = field(default_factory=dict)
     routing_summary_lines: List[str] = field(default_factory=list)
+    routing_summary: List[str] = field(default_factory=list)  # short items for Attribute-D
     raw_size_bytes: int = 0
     fall_through_count: int = 0
     parsed_line_count: int = 0
@@ -527,9 +528,19 @@ def _extract_interfaces_sectionwise(parsed: ParsedConfig, raw_text: str) -> None
     ``_consume_iface_line`` until a blank line, a ``!`` separator, or a new
     top-level stanza is reached. This is independent of indentation, so it works
     for both normally-indented configs and flattened dumps.
+
+    An ``interface`` line indented deeper than the shallowest ``interface``
+    line sits inside a routing block (``router isis`` / ``router ospf`` /
+    ``sdwan``) and is not an interface definition, so it is skipped. A name
+    seen twice is read into the same interface rather than replacing it.
     """
     lines = raw_text.splitlines()
     n = len(lines)
+    top_indent = min(
+        (len(line) - len(line.lstrip()) for line in lines
+         if re.match(r"^\s*interface\s+\S", line)),
+        default=0,
+    )
     i = 0
     while i < n:
         s = lines[i].strip()
@@ -539,13 +550,16 @@ def _extract_interfaces_sectionwise(parsed: ParsedConfig, raw_text: str) -> None
         if not m:
             i += 1
             continue
+        if len(lines[i]) - len(lines[i].lstrip()) > top_indent:
+            i += 1
+            continue
         name = m.group(1)
         # Skip "interface range ..." group commands — they are bulk editors, not
         # a single addressable port, and never carry their own IP.
         if re.match(r"^range\b", name, re.IGNORECASE):
             i += 1
             continue
-        iface = ParsedInterface(name=name, kind=_iface_kind(name))
+        iface = parsed.interfaces.get(name) or ParsedInterface(name=name, kind=_iface_kind(name))
         i += 1
         while i < n:
             cs = lines[i].strip()
@@ -634,6 +648,95 @@ def _collect_routing_summary(parsed: ParsedConfig, raw_text: str) -> None:
         s = line.strip()
         if s.startswith(("ip pim rp-address", "ip nat ", "ip dhcp ")):
             parsed.routing_summary_lines.append(s)
+    parsed.routing_summary = summarize_routing(raw_text)
+
+
+_STANZA_HEAD_RE = re.compile(
+    r"^\s*(?:hostname|interface|router|vrf|ip\s+vrf|segment-routing|mpls\s+ldp)\b",
+    re.IGNORECASE,
+)
+
+
+def _indent(line: str) -> int:
+    return len(line) - len(line.lstrip())
+
+
+def _top_blocks(lines: List[str]) -> List[Tuple[str, List[str]]]:
+    """``(top-level line, deeper child lines)`` for every top-level stanza.
+
+    Top level is the shallowest indentation of a stanza keyword, so a config
+    that is indented as a whole (cloud-init style) still splits correctly.
+    """
+    base = min((_indent(l) for l in lines if _STANZA_HEAD_RE.match(l)), default=0)
+    blocks: List[Tuple[str, List[str]]] = []
+    for line in lines:
+        if not line.strip() or line.strip() == "!":
+            continue
+        if _indent(line) > base:
+            if blocks:
+                blocks[-1][1].append(line)
+        else:
+            blocks.append((line.strip(), []))
+    return blocks
+
+
+def summarize_routing(raw_text: str) -> List[str]:
+    """Short items naming the routing configured on a device.
+
+    For example ``IS-IS 1 L2``, ``BGP 64512 (vpnv4)``,
+    ``SRv6 LOC1 2001:db8:1::/48`` and ``VRF BLUE``. Only indented
+    (non-flattened) configs give address families and locator prefixes.
+    """
+    items: List[str] = []
+    vrfs: List[str] = []
+    for head, body in _top_blocks(raw_text.splitlines()):
+        words = head.split()
+        low = [w.lower() for w in words]
+        if low[:2] == ["router", "isis"] and len(words) >= 3:
+            level = ""
+            for child in body:
+                c = child.strip().lower()
+                if c.startswith("is-type"):
+                    level = {"level-1": "L1", "level-2-only": "L2", "level-2": "L2",
+                             "level-1-2": "L1/L2"}.get(c.split()[-1], "")
+            items.append(" ".join(x for x in ("IS-IS", words[2], level) if x))
+        elif low[:2] in (["router", "ospf"], ["router", "ospfv3"]) and len(words) >= 3:
+            items.append(f"{'OSPFv3' if low[1] == 'ospfv3' else 'OSPF'} {words[2]}")
+        elif low[:2] == ["router", "eigrp"] and len(words) >= 3:
+            items.append(f"EIGRP {words[2]}")
+        elif low[:2] == ["router", "bgp"] and len(words) >= 3:
+            depth = min((_indent(c) for c in body), default=0)
+            families: List[str] = []
+            for child in body:
+                c = child.strip().split()
+                if _indent(child) != depth or len(c) < 2 or c[0].lower() != "address-family":
+                    continue
+                af = [w for w in c[1:] if w.lower() not in ("unicast", "multicast")]
+                if "vrf" in [w.lower() for w in af]:
+                    continue
+                name = " ".join(af).replace("l2vpn evpn", "evpn")
+                if name and name not in families:
+                    families.append(name)
+            items.append(f"BGP {words[2]}" + (f" ({', '.join(families)})" if families else ""))
+        elif low[:1] == ["segment-routing"]:
+            locator = ""
+            for child in body:
+                c = child.strip().split()
+                if len(c) == 2 and c[0].lower() == "locator":
+                    locator = c[1]
+                elif len(c) >= 2 and c[0].lower() == "prefix" and locator:
+                    items.append(f"SRv6 {locator} {c[1]}")
+                    locator = ""
+        elif low[:2] == ["mpls", "ldp"]:
+            items.append("LDP")
+        elif low[:1] == ["vrf"] and len(words) == 2:
+            vrfs.append(words[1])
+        elif low[:2] in (["vrf", "definition"], ["vrf", "context"], ["ip", "vrf"]) and len(words) >= 3:
+            vrfs.append(words[2])
+    vrfs = [v for v in dict.fromkeys(vrfs) if v.lower() not in ("management", "mgmt-intf", "mgmt")]
+    if vrfs:
+        items.append("VRF " + ",".join(vrfs))
+    return items
 
 
 # ---------------------------------------------------------------------------

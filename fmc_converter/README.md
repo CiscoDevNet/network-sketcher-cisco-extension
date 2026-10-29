@@ -102,7 +102,9 @@ devices, coloured grey because they are not real. The Model column is pink
 
 `fetch_from_fmc` signs in with the FMC username and password, then only reads.
 The password is taken from `--password` or the `FMC_PASSWORD` environment
-variable and is not written to the export or the log. TLS certificate
+variable and is not written to the export or the log. Device registration
+keys (`regKey`, `natID`), the HA failover `sharedKey` and any password field
+are removed from the export as well. TLS certificate
 verification is **off** unless you pass `--verify-tls`. `--probe` checks the
 login and the server version, then exits without writing a file.
 

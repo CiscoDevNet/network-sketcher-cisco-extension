@@ -77,7 +77,17 @@ python -m cml_converter.src.convert \
 `fetch_from_cml` authenticates with `POST /api/v0/authenticate` and downloads
 each lab with `GET /api/v0/labs/{id}` and `GET /api/v0/labs/{id}/topology`.
 It never starts, stops, or edits a lab. The password is not written to the
-export or to the log.
+export or to the log. Each node's pyATS block (`username`, `password`,
+`enable_password`) is removed before the file is written. Each node's saved
+configuration is kept, because `convert` reads it, so the export can still
+contain the `enable secret`, `username ... password` and SNMP community lines
+of those configs; treat it like the configs themselves.
+
+The export carries each node's **saved** configuration, not the running one.
+A node that was never saved in CML still holds CML's day-0 template
+(`hostname inserthostname-here`); `convert` skips it and lists it in
+`parse_report.md` as "config not extracted". To include those nodes, run
+**Extract Configs** on the lab in CML before fetching.
 
 The lab list is `GET /api/v0/labs?show_all=true`. CML's plain `GET /api/v0/labs`
 returns only labs owned by the logged-in user, so a lab created by another
@@ -110,6 +120,26 @@ configs are read under the new label. A YAML file that is not this multi-lab
 JSON keeps the previous area rules, and the same case-insensitive rename
 applies there too.
 
+## What is read from each node
+
+- **Interfaces** come from `interface` stanzas at the top level of the config.
+  An `interface` line nested deeper, such as inside `router isis`,
+  `router ospf` or `sdwan`, is part of that block and does not replace the
+  interface's addresses. A config indented as a whole (cloud-init style) and a
+  flattened dump with every line at column 0 are both read.
+- **Placement** follows the CML canvas. Nodes whose heights differ by more than
+  20 px are on different rows, even on a wide, shallow canvas.
+- **Attribute-D** carries a short routing summary, for example
+  `Routing: IS-IS 1 L2 | BGP 64512 (ipv4, vpnv4) | SRv6 LOC1 2001:db8:1::/48 | VRF BLUE`.
+  It lists IS-IS, OSPF / OSPFv3, EIGRP, BGP (AS and address families), SRv6
+  locators, LDP and VRFs; when none are found it shows the start of the
+  routing blocks instead. Up to 120 characters are kept.
+- **Model / OS** come from `node_definition`. A custom definition named after
+  its release (for example `iosxrd-cp-<version>`, the XRd Control Plane) is
+  matched by the name before the version.
+- **Not drawn**: MTU, VRF route distinguishers and route targets,
+  route-policies and link conditioning have no place in Network Sketcher.
+
 ## Output files
 
 | File | Description |
@@ -117,7 +147,7 @@ applies there too.
 | `ns_commands.txt` | Network Sketcher CLI commands (Phase 1–6) |
 | `ns_model.json` | Intermediate topology model for debugging |
 | `stencil_mapping.csv` | Device stencil-type mapping with confidence scores |
-| `parse_report.md` | Per-device running-config coverage statistics |
+| `parse_report.md` | Per-device running-config coverage statistics, skipped ports, and nodes whose config was never extracted in CML |
 
 ## Device color conventions
 

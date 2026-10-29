@@ -143,6 +143,10 @@ Authenticates with a NetBox **API token** (`Authorization: Token <key>` — the
 native scheme; `--bearer` switches to `Bearer`), then pulls only the **core
 DCIM/IPAM** collections (no plugin / custom-field routes, for portability),
 following NetBox `next` pagination to completion. Read-only (GET only).
+Devices are fetched with `exclude=config_context`, and `config_context`,
+`local_context_data` and `custom_fields` are removed from every object before
+the file is written, because those free-form fields often hold SNMP
+communities or TACACS/RADIUS keys. The converter reads none of them.
 
 | Flag | Meaning |
 |------|---------|

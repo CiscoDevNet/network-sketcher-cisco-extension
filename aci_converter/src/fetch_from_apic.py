@@ -152,6 +152,60 @@ def fetch_mit(client: ApicClient, with_topology: bool = True) -> Dict[str, Any]:
     return {"totalCount": str(len(imdata)), "imdata": imdata}
 
 
+_SECRET_ATTRS = frozenset({"pwd", "password", "key", "authkey", "privkey",
+                           "presharedkey", "secret"})
+_SECRET_CLASSES = frozenset({"snmpCommunityP"})
+
+
+def _strip_mo(mo: Any) -> int:
+    removed = 0
+    if not isinstance(mo, dict):
+        return 0
+    for body in mo.values():
+        if not isinstance(body, dict):
+            continue
+        attrs = body.get("attributes")
+        if isinstance(attrs, dict):
+            for name in [a for a in attrs if str(a).lower() in _SECRET_ATTRS]:
+                del attrs[name]
+                removed += 1
+        children = body.get("children")
+        if isinstance(children, list):
+            kept = []
+            for child in children:
+                if isinstance(child, dict) and _SECRET_CLASSES & set(child):
+                    removed += 1
+                    continue
+                removed += _strip_mo(child)
+                kept.append(child)
+            body["children"] = kept
+    return removed
+
+
+def strip_secrets(doc: Dict[str, Any]) -> int:
+    """Remove SNMP community MOs and password / key attributes at any depth.
+
+    A tenant subtree can hold an ``snmpCommunityP`` (its ``name`` is the
+    community string), and AAA, SNMPv3 and routing-protocol MOs can carry
+    ``pwd`` / ``key`` / ``authKey`` style attributes. The converter reads none
+    of them. Returns how many objects or attributes were removed.
+    """
+    imdata = doc.get("imdata")
+    if not isinstance(imdata, list):
+        return 0
+    kept = []
+    removed = 0
+    for mo in imdata:
+        if isinstance(mo, dict) and _SECRET_CLASSES & set(mo):
+            removed += 1
+            continue
+        removed += _strip_mo(mo)
+        kept.append(mo)
+    doc["imdata"] = kept
+    doc["totalCount"] = str(len(kept))
+    return removed
+
+
 def probe_access(client: ApicClient) -> None:
     """Confirm that the authenticated account can read the fabric inventory."""
     response = client._request("/api/class/fabricNodeIdentP.json")
@@ -212,6 +266,10 @@ def main(argv: Optional[list] = None) -> int:
         print(f"[ERROR] fetch failed: {exc}", file=sys.stderr)
         return 1
 
+    removed = strip_secrets(doc)
+    if removed:
+        print(f"[ok] removed {removed} SNMP community or password value(s) from the export",
+              file=sys.stderr)
     with open(args.out, "w", encoding="utf-8") as fh:
         json.dump(doc, fh, indent=1)
     print(f"[ok] wrote {args.out} ({len(doc['imdata'])} top-level MOs)", file=sys.stderr)

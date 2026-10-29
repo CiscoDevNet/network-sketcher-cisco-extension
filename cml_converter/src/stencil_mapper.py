@@ -14,6 +14,7 @@ Confidence values:
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import Dict, Iterable, List, Optional
 
@@ -45,6 +46,8 @@ NODE_DEF_TABLE: Dict[str, tuple] = {
     "iol-xe": (NS_ROUTER, "IOL-XE (Cisco IOS-XE on Linux)", "IOS-XE"),
     "ioll2-xe": (NS_SWITCH, "IOL L2-XE (Cisco IOS-XE Switch on Linux)", "IOS-XE"),
     "xrd": (NS_ROUTER, "XRd (Cisco IOS XR Container)", "IOS-XR"),
+    "iosxrd": (NS_ROUTER, "XRd (Cisco IOS XR Container)", "IOS-XR"),
+    "iosxrd-cp": (NS_ROUTER, "XRd Control Plane (Cisco IOS XR Container)", "IOS-XR"),
     "asav": (NS_FIREWALL, "ASAv (Cisco Adaptive Security Appliance Virtual)", "ASA"),
     "ftdv": (NS_FIREWALL, "FTDv (Cisco Firepower Threat Defense Virtual)", "FTD"),
     "meraki-vmx": (NS_FIREWALL, "Meraki vMX (Cisco Meraki Virtual MX)", "Meraki"),
@@ -110,6 +113,14 @@ LABEL_KEYWORD_RULES = [
 ]
 
 
+def _versioned_key(nd: str) -> Optional[str]:
+    """Longest table key that ``nd`` extends with ``-<digit>...`` or ``_<digit>...``."""
+    for key in sorted(NODE_DEF_TABLE, key=len, reverse=True):
+        if re.match(re.escape(key) + r"[-_]\d", nd):
+            return key
+    return None
+
+
 @dataclass
 class StencilMapping:
     label: str
@@ -132,9 +143,13 @@ def map_one(
     tags = list(tags or [])
     nd = (node_definition or "").lower()
 
-    # Direct lookup wins.
-    if nd in NODE_DEF_TABLE:
-        stencil, model, os_str = NODE_DEF_TABLE[nd]
+    # Direct lookup wins; a custom definition named after its release
+    # (``iosxrd-cp-<version>``) is looked up by the part before the version.
+    key = nd if nd in NODE_DEF_TABLE else _versioned_key(nd)
+    if key:
+        stencil, model, os_str = NODE_DEF_TABLE[key]
+        reason = (f"direct table hit on node_definition='{node_definition}'" if key == nd
+                  else f"table hit on '{key}' for versioned node_definition='{node_definition}'")
         return StencilMapping(
             label=label,
             node_definition=node_definition,
@@ -143,7 +158,7 @@ def map_one(
             model=model,
             os=os_str,
             confidence=1.0,
-            reason=f"direct table hit on node_definition='{node_definition}'",
+            reason=reason,
             tags=tags,
         )
 

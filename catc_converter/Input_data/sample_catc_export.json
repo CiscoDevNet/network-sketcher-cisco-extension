@@ -6915,7 +6915,6 @@
    "wlanType": "Enterprise",
    "authType": "WPA2_PERSONAL",
    "l3AuthType": "None",
-   "passphrase": "NO!$DATA!$",
    "externalAuthIpAddress": "",
    "fastTransition": "DISABLE",
    "authServer": "auth_ise",

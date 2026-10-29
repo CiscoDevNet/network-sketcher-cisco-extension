@@ -335,7 +335,10 @@ The converter reads local files, but `fetch_from_apic.py` grabs the model
 straight from a reachable APIC and writes a `convert`-ready JSON. Retrieval is
 **read-only** — it never modifies the fabric. Credentials come from a CLI arg or
 the `ACI_PASSWORD` env var (never hard-coded); APIC self-signed certs are
-accepted by default (`--verify-tls` to enforce).
+accepted by default (`--verify-tls` to enforce). Before the file is written,
+`snmpCommunityP` objects (whose name is the community string) and `pwd` /
+`password` / `key` / `authKey` / `privKey` / `preSharedKey` attributes are
+removed; the converter reads none of them.
 
 Use `--probe` to authenticate and read only `fabricNodeIdentP`, without
 collecting the policy/topology model or writing an export.

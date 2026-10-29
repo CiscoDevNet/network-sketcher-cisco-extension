@@ -201,6 +201,60 @@ def fetch_model(client: NdClient, only_fabrics: Optional[List[str]] = None,
     return out
 
 
+_SECRET_SUFFIXES = ("password", "passwd", "authkey", "keystring", "secret",
+                    "community", "presharedkey", "psk")
+
+
+def _is_secret_key(key: str) -> bool:
+    k = str(key).lower().replace("_", "").replace("-", "")
+    if k.endswith(_SECRET_SUFFIXES):
+        return True
+    # Free-text config blocks (EXTRA_CONF_*, *_CONF, freeformConfig) can embed
+    # any CLI, including keys and passwords. Template JSON keys such as
+    # vrfTemplateConfig end in "config", not "conf", and are kept.
+    return "extraconf" in k or "freeform" in k or k.endswith("conf")
+
+
+def _strip(obj: Any) -> int:
+    removed = 0
+    if isinstance(obj, dict):
+        for key, value in list(obj.items()):
+            if isinstance(value, str) and value.strip():
+                if _is_secret_key(key) and value.strip().lower() not in ("true", "false"):
+                    obj[key] = ""
+                    removed += 1
+                    continue
+                text = value.strip()
+                if text.startswith("{"):
+                    try:
+                        inner = json.loads(text)
+                    except ValueError:
+                        inner = None
+                    if isinstance(inner, dict):
+                        found = _strip(inner)
+                        if found:
+                            obj[key] = json.dumps(inner)
+                            removed += found
+            else:
+                removed += _strip(value)
+    elif isinstance(obj, list):
+        for item in obj:
+            removed += _strip(item)
+    return removed
+
+
+def strip_secrets(doc: Dict[str, Any]) -> int:
+    """Clear authentication keys, passwords and free-text config from an export.
+
+    NDFC returns BGP/OSPF/IS-IS/BFD/PIM authentication keys, MACsec key
+    strings, extra-config CLI and template passwords (``bgpPassword`` inside
+    ``vrfTemplateConfig``) in plain text. The converter reads none of them.
+    Values are set to ``""`` so every key the converter does read stays in
+    place. Returns how many values were cleared.
+    """
+    return _strip(doc)
+
+
 def main(argv: Optional[list] = None) -> int:
     p = argparse.ArgumentParser(
         description="Pull an NDFC / Fabric Controller model over the Nexus Dashboard REST API (read-only).",
@@ -263,6 +317,10 @@ def main(argv: Optional[list] = None) -> int:
         print(f"[ERROR] fetch failed: {exc}", file=sys.stderr)
         return 1
 
+    removed = strip_secrets(doc)
+    if removed:
+        print(f"[ok] cleared {removed} key, password or free-text config value(s) "
+              f"from the export", file=sys.stderr)
     with open(args.out, "w", encoding="utf-8") as fh:
         json.dump(doc, fh, indent=1, ensure_ascii=False)
     nfab = len(doc.get("fabrics", []))

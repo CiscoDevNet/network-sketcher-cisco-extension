@@ -203,6 +203,34 @@ def fetch_model(client: FmcClient) -> Dict[str, Any]:
             "devices": devices, "ha_pairs": pairs}
 
 
+_SECRET_KEYS = frozenset({"regkey", "natid", "sharedkey", "pppoepassword"})
+
+
+def _is_secret_key(key: Any) -> bool:
+    k = str(key).lower()
+    return k in _SECRET_KEYS or "password" in k or "secret" in k
+
+
+def strip_secrets(obj: Any) -> int:
+    """Remove registration keys, HA shared keys and passwords at any depth.
+
+    Device records can carry ``regKey`` / ``natID``, an HA pair carries the
+    failover ``sharedKey``, and a PPPoE interface its password. The converter
+    reads none of them. Returns how many values were removed.
+    """
+    removed = 0
+    if isinstance(obj, dict):
+        for key in [k for k in obj if _is_secret_key(k)]:
+            del obj[key]
+            removed += 1
+        for value in obj.values():
+            removed += strip_secrets(value)
+    elif isinstance(obj, list):
+        for item in obj:
+            removed += strip_secrets(item)
+    return removed
+
+
 def main(argv: Optional[list] = None) -> int:
     parser = argparse.ArgumentParser(
         description="Pull a Firewall Management Center model (read-only).",
@@ -247,6 +275,10 @@ def main(argv: Optional[list] = None) -> int:
     except (urllib.error.URLError, RuntimeError, KeyError, TypeError, ValueError) as exc:
         print(f"[ERROR] fetch failed: {exc}", file=sys.stderr)
         return 1
+    removed = strip_secrets(document)
+    if removed:
+        print(f"[ok] removed {removed} key or password value(s) from the export",
+              file=sys.stderr)
     with open(args.out, "w", encoding="utf-8") as fh:
         json.dump(document, fh, indent=1, ensure_ascii=False)
     print(f"[ok] wrote {args.out} ({len(document['devices'])} device(s))", file=sys.stderr)

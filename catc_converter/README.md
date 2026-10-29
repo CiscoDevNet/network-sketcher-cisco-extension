@@ -206,6 +206,8 @@ JSON. Retrieval is **read-only** — it never modifies the fabric. It authentica
 **`X-Auth-Token`** header (not a Cookie / Bearer). Credentials come from a CLI
 arg or the `CATC_PASSWORD` env var (never hard-coded); Catalyst Center
 self-signed certs are accepted by default (`--verify-tls` to enforce).
+Before the file is written, every SSID `passphrase` (including multi-PSK
+entries) is removed; the converter uses only the SSID name and VLAN.
 
 Use `--probe` to authenticate and read only the sites endpoint, without
 collecting the model or writing an export.

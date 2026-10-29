@@ -270,6 +270,42 @@ def fetch_org(client: MerakiClient, org_id: str,
     return out
 
 
+_SSID_SECRET_KEYS = frozenset({"psk", "secret", "password", "sharedsecret", "passphrase"})
+_BGP_SECRET_KEYS = frozenset({"authentication", "password", "secret"})
+
+
+def _drop_keys(obj: Any, names: frozenset) -> int:
+    """Remove every key whose lower-cased name is in ``names``, at any depth."""
+    removed = 0
+    if isinstance(obj, dict):
+        for key in [k for k in obj if str(k).lower() in names]:
+            del obj[key]
+            removed += 1
+        for value in obj.values():
+            removed += _drop_keys(value, names)
+    elif isinstance(obj, list):
+        for item in obj:
+            removed += _drop_keys(item, names)
+    return removed
+
+
+def strip_secrets(doc: Dict[str, Any]) -> int:
+    """Remove SSID PSKs, RADIUS secrets and BGP neighbour passwords.
+
+    The Dashboard API returns an SSID's ``psk`` in plain text, and RADIUS
+    servers and AutoVPN BGP neighbours can carry a secret or password. The
+    converter reads only names, VLANs and AS numbers from these objects.
+    Returns how many values were removed.
+    """
+    removed = 0
+    for detail in (doc.get("networkDetails") or {}).values():
+        if not isinstance(detail, dict):
+            continue
+        removed += _drop_keys(detail.get("wirelessSsids"), _SSID_SECRET_KEYS)
+        removed += _drop_keys(detail.get("applianceVpnBgp"), _BGP_SECRET_KEYS)
+    return removed
+
+
 def main(argv: Optional[list] = None) -> int:
     p = argparse.ArgumentParser(
         description="Pull a Meraki organization model over the Dashboard API v1 (read-only).",
@@ -317,6 +353,10 @@ def main(argv: Optional[list] = None) -> int:
         print(f"[ERROR] fetch failed: {exc}", file=sys.stderr)
         return 1
 
+    removed = strip_secrets(doc)
+    if removed:
+        print(f"[ok] removed {removed} PSK, RADIUS secret or BGP password value(s) "
+              f"from the export", file=sys.stderr)
     out_path = args.out
     os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
     with open(out_path, "w", encoding="utf-8") as fh:
