@@ -739,34 +739,41 @@ class ParserTests(unittest.TestCase):
 
 
 class ErrorTests(unittest.TestCase):
-    def test_no_overlay_exits_3_with_day0_hint(self):
-        doc = _lab_yaml("plain", [
-            ("r1", "iosv", ["GigabitEthernet0/0"], CE.format(name="r1", ip="192.0.2.1")),
-            ("r2", "iosv", ["GigabitEthernet0/0"], "hostname inserthostname-here\n"),
-        ], [("r1", "GigabitEthernet0/0", "r2", "GigabitEthernet0/0")])
-        run = _convert(doc, "--mode", "overlay")
-        self.assertEqual(run.rc, 3)
-        self.assertIn("No overlay configuration (VXLAN EVPN / SD-WAN / L3VPN) was found", run.stderr)
+    PLAIN = [
+        ("r1", "iosv", ["GigabitEthernet0/0"], CE.format(name="r1", ip="192.0.2.1")),
+        ("r2", "iosv", ["GigabitEthernet0/0"], "hostname inserthostname-here\n"),
+    ]
+    PLAIN_LINKS = [("r1", "GigabitEthernet0/0", "r2", "GigabitEthernet0/0")]
+
+    def test_no_overlay_warns_and_draws_the_underlay(self):
+        run = _convert(_lab_yaml("plain", self.PLAIN, self.PLAIN_LINKS), "--mode", "overlay")
+        self.assertEqual(run.rc, 0, run.stderr)
+        self.assertIn("[WARN] No overlay configuration (VXLAN EVPN / SD-WAN / L3VPN) was found",
+                      run.stderr)
         self.assertIn("r2", run.stderr)
         self.assertIn("Extract Configs", run.stderr)
-        self.assertFalse((run.out_dir / "ns_commands_cml_overlay.txt").exists())
+        self.assertIn("Every lab is drawn as in the underlay", run.stderr)
         self.assertFalse((run.out_dir / "ns_commands.txt").exists())
+        self.assertIn("Every lab is drawn as in the underlay", run.report)
+        m = run.model
+        self.assertEqual(set(m["devices"]), {"r1", "r2"})
+        self.assertIsNotNone(_linked(m, "r1", "r2"))
+        self.assertEqual(_ips(m)[("r1", "GigabitEthernet 0/0")], ["192.0.2.1/30"])
 
-    def test_both_mode_warns_and_still_writes_underlay(self):
-        doc = _lab_yaml("plain", [
-            ("r1", "iosv", ["GigabitEthernet0/0"], CE.format(name="r1", ip="192.0.2.1")),
-        ], [])
-        run = _convert(doc, "--mode", "both")
+    def test_both_mode_overlay_script_equals_the_underlay(self):
+        run = _convert(_lab_yaml("plain", self.PLAIN, self.PLAIN_LINKS), "--mode", "both")
         self.assertEqual(run.rc, 0)
         self.assertIn("[WARN] No overlay configuration", run.stderr)
-        self.assertTrue((run.out_dir / "ns_commands.txt").exists())
-        self.assertFalse((run.out_dir / "ns_commands_cml_overlay.txt").exists())
+        underlay = (run.out_dir / "ns_commands.txt").read_text(encoding="utf-8")
+        self.assertEqual(run.script, underlay)
 
-    def test_requested_type_missing_exits_3(self):
+    def test_requested_type_missing_warns(self):
         run = _convert(_lab_yaml("sdwan", _sdwan_nodes(), SDWAN_LINKS),
                        "--mode", "overlay", "--overlay", "evpn")
-        self.assertEqual(run.rc, 3)
-        self.assertIn("Requested overlay type(s) not found", run.stderr)
+        self.assertEqual(run.rc, 0)
+        self.assertIn("[WARN] Requested overlay type(s) not found", run.stderr)
+        self.assertNotIn("VPN:sdwan-10", run.model["devices"])
+        self.assertIn("dc-edge", run.model["devices"])
 
     def test_overlay_filter_draws_only_the_requested_type(self):
         nodes = _evpn_nodes(border=True) + _sdwan_nodes()

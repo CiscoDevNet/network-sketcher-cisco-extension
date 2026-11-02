@@ -27,8 +27,8 @@ absolute path):
 - ``<stem>_cml_overlay.txt`` / ``ns_model_overlay.json`` / ``overlay_report.md``
   – the integrated overlay (VXLAN EVPN + SD-WAN + L3VPN), ``--mode overlay|both``
 
-``--mode overlay`` exits with code 3 when no overlay (or none of the
-``--overlay`` types) is found in the node configs.
+When no overlay (or none of the ``--overlay`` types) is found in the node
+configs, ``--mode overlay`` warns and draws every lab as in the underlay.
 
 ``fetch_from_cml.py`` can pull labs over the read-only REST API into a local
 JSON file. Conversion itself still reads only that file. A multi-lab JSON
@@ -57,8 +57,6 @@ from .topology_mapper import _pick_area, build_ns_model, model_to_dict
 from .ns_command_builder import build_command_script
 from .overlay_parser import OVERLAY_TITLES
 from .overlay_stitch import build_overlay_model, write_overlay_report
-
-EXIT_NO_OVERLAY = 3
 
 
 # ---------------------------------------------------------------------------
@@ -453,8 +451,12 @@ def _write_overlay(
     raw_configs: Dict[str, str],
     parsed_configs: Dict[str, Any],
     not_extracted: List[str],
-) -> int:
-    """Write the integrated overlay; 0, or EXIT_NO_OVERLAY when none is found."""
+) -> None:
+    """Write the integrated overlay.
+
+    With no overlay found (or none of the requested types) it warns and every
+    lab is drawn as in the underlay, so the script is still usable.
+    """
     out_dir = out_path.parent
     print("[4b] Building integrated overlay …")
     wanted = args.overlay or ["auto"]
@@ -473,16 +475,14 @@ def _write_overlay(
         problem = (f"Requested overlay type(s) not found in the node configs: "
                    f"{', '.join(OVERLAY_TITLES[t] for t in missing)} (found: {found_text}).")
     if problem:
-        level = "[WARN]" if args.mode == "both" else "[ERROR]"
-        print(f"{level} {problem}", file=sys.stderr)
+        print(f"[WARN] {problem}", file=sys.stderr)
         if not_extracted:
             print(f"        {len(not_extracted)} node(s) still have CML's day-0 config: "
                   f"{', '.join(not_extracted)}", file=sys.stderr)
             print("        Run 'Extract Configs' in CML (or fetch the lab after it has booted) "
                   "and convert again.", file=sys.stderr)
-        if args.mode == "both":
-            print("        The underlay is written; the overlay is skipped.", file=sys.stderr)
-        return EXIT_NO_OVERLAY
+        if not result.drawn:
+            print("        Every lab is drawn as in the underlay.", file=sys.stderr)
 
     overlay_devices = set(result.model.devices) - result.canvas.underlay_devices
     script = build_command_script(result.model, port_info_unknown=overlay_devices)
@@ -492,7 +492,7 @@ def _write_overlay(
         json.dumps(model_to_dict(result.model), indent=2, ensure_ascii=False),
         encoding="utf-8",
     )
-    write_overlay_report(out_dir / "overlay_report.md", result, not_extracted)
+    write_overlay_report(out_dir / "overlay_report.md", result, not_extracted, problem)
     print(f"  overlay found    : {found_text}")
     print(f"  {overlay_path.name} → {overlay_path}")
     print(f"  ns_model_overlay.json / overlay_report.md → {out_dir}")
@@ -502,7 +502,6 @@ def _write_overlay(
           + (f"; labs with no overlay: {', '.join(result.underlay_labs)}" if result.underlay_labs else ""))
     if result.canvas.notes:
         print(f"  [WARN] {len(result.canvas.notes)} overlay note(s). See overlay_report.md.")
-    return 0
 
 
 # ---------------------------------------------------------------------------
@@ -640,12 +639,10 @@ def main(argv: Optional[list] = None) -> int:
     model, parse_stats = build_ns_model(nodes, links, stencil_map, parsed_configs, layout=args.layout)
 
     if write_overlay:
-        overlay_rc = _write_overlay(
+        _write_overlay(
             args, raw_data, yaml_path, out_path, nodes, model, stencil_map,
             raw_configs, parsed_configs, not_extracted,
         )
-        if overlay_rc and not write_underlay:
-            return overlay_rc
     if not write_underlay:
         print("\n[Done] All outputs written.")
         return 0

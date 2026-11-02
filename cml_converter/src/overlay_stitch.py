@@ -519,17 +519,18 @@ def build_overlay_model(
 
     canvas = OverlayCanvas()
     canvas.seed_names(labels)
-    if not drawn:
-        return OverlayResult(canvas.model, canvas, facts, found, drawn)
 
+    # With no overlay drawn every lab takes the no-overlay path below and is
+    # copied from the underlay unchanged.
     areas = assign_overlay_areas(labels, lab_of, l1_links, facts)
-    attachments: List[Attachment] = []
-    attachments += build_sdwan(canvas, facts, areas, lab_of, stencils)
-    evpn = build_evpn(canvas, facts, areas, lab_of, stencils, l1_links)
-    attachments += evpn
-    attachments += build_l3vpn(canvas, facts, areas, lab_of, stencils,
-                               taken={(a.device, a.port) for a in evpn})
-    _Stitcher(canvas, facts, areas, lab_of, stencils, l1_links, attachments).run()
+    if drawn:
+        attachments: List[Attachment] = []
+        attachments += build_sdwan(canvas, facts, areas, lab_of, stencils)
+        evpn = build_evpn(canvas, facts, areas, lab_of, stencils, l1_links)
+        attachments += evpn
+        attachments += build_l3vpn(canvas, facts, areas, lab_of, stencils,
+                                   taken={(a.device, a.port) for a in evpn})
+        _Stitcher(canvas, facts, areas, lab_of, stencils, l1_links, attachments).run()
 
     overlay_labs = {lab_of[label] for label, f in facts.items() if f.types() and label in lab_of}
     area_lab = _add_underlay(canvas, underlay, facts, labels, lab_of, areas, overlay_labs)
@@ -549,10 +550,18 @@ def build_overlay_model(
 # Report
 # ---------------------------------------------------------------------------
 
-def write_overlay_report(path: Any, result: OverlayResult, not_extracted: List[str]) -> None:
+def write_overlay_report(path: Any, result: OverlayResult, not_extracted: List[str],
+                         problem: str = "") -> None:
     from .overlay_parser import OVERLAY_TITLES
 
     lines: List[str] = ["# CML overlay report", ""]
+    if problem:
+        lines.append(f"> **{problem}**" + (
+            " Every lab is drawn as in the underlay." if not result.drawn else ""))
+        if not_extracted:
+            lines.append(f"> {len(not_extracted)} node(s) still have CML's day-0 config; "
+                         "see the end of this report.")
+        lines.append("")
     lines.append("Overlay found in the configs: " + (
         ", ".join(OVERLAY_TITLES[t] for t in result.found) or "none"))
     lines.append("Overlay drawn: " + (", ".join(OVERLAY_TITLES[t] for t in result.drawn) or "none"))

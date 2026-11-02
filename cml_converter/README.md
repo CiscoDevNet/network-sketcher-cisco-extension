@@ -147,10 +147,11 @@ an overlay; the rest stays as in the underlay:
 
 **No overlay.** When the configs hold none of the three (or none of the
 `--overlay` types), `--mode overlay` prints
-`[ERROR] No overlay configuration (VXLAN EVPN / SD-WAN / L3VPN) was found in the node configs.`
-and exits with code **3**, listing the nodes that still carry CML's day-0
-config (run **Extract Configs** in CML and convert again). `--mode both` prints
-the same message as a warning, writes the underlay, and exits 0.
+`[WARN] No overlay configuration (VXLAN EVPN / SD-WAN / L3VPN) was found in the node configs.`
+and the nodes that still carry CML's day-0 config (run **Extract Configs** in
+CML and convert again). It still writes the overlay script, with every lab
+drawn as in the underlay, says so at the top of `overlay_report.md`, and
+exits 0. `--mode both` does the same and also writes the underlay.
 
 ## Fetching labs from CML
 
@@ -294,13 +295,21 @@ cml_converter/
 
 ## Changelog
 
+### No overlay found
+
+- **`--mode overlay` no longer fails when no overlay is found** (it exited with
+  code 3, so an importer that stops on a non-zero exit drew nothing). It now
+  warns, writes the overlay script with every lab drawn as in the underlay,
+  and exits 0. The same applies when none of the `--overlay` types is found.
+
 ### Overlay mode
 
 - **`--mode {underlay,overlay,both}`**: `overlay` writes one integrated
   overlay script (VXLAN EVPN, SD-WAN and L3VPN found in the saved configs,
   with the handoffs between them) plus `ns_model_overlay.json` and
   `overlay_report.md`. The default `underlay` output is unchanged.
-  `--overlay` narrows the types drawn. No overlay found exits with code 3.
+  `--overlay` narrows the types drawn. When no overlay is found, every lab
+  is drawn as in the underlay (see above).
 - **Classic IOS `ip vrf forwarding <name>`**: the interface's VRF and the IP
   address after it were lost, because the line was taken for the start of a
   top-level `ip vrf` stanza. Both are now read (underlay and overlay).
