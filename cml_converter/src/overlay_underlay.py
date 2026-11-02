@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import replace
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Set, Tuple
 
 from .overlay_canvas import OverlayCanvas
 from .topology_mapper import NSModel, NSPortChannel, NSSubInterface, NSVirtualPort
@@ -83,20 +83,58 @@ class UnderlayCopier:
         for port in self.ports_of.get(name, []):
             self._port_items(name, port)
 
-    def copy_port(self, device: str, port: str) -> None:
+    def fill_remaining(self, name: str) -> None:
+        """Add the underlay ports a stitch-placed device does not have yet.
+
+        An SVI already used as an L1 end (a VRF handoff) stays an L1 end, so
+        it is not also declared a virtual port.
+        """
+        c = self.canvas
+        existing_v = {(v.device, v.port) for v in c.model.virtual_ports}
+        for v in self.virtual_ports.get(name, []):
+            key = (v.device, v.port)
+            if key in c.linked_ports or key in existing_v:
+                continue
+            c.virtual_port(v.device, v.port, v.is_loopback, v.vlan_id)
+            existing_v.add(key)
+        for pc in self.port_channels.get(name, []):
+            for member in pc.physical_ports:
+                if (name, member) in c.linked_ports:
+                    c.portchannel(name, member, pc.portchannel_name)
+        for si in self.subifs.get(name, []):
+            if any(s.device == si.device and s.subif_port == si.subif_port
+                   for s in c.model.subinterfaces):
+                continue
+            if ((si.device, si.parent_port) in c.linked_ports
+                    or (si.device, si.subif_port) in c.linked_ports):
+                c.model.subinterfaces.append(replace(si))
+        for port in self.ports_of.get(name, []):
+            # A port the stitch already linked (the peer SVI) keeps the IP and
+            # VRF it was given. Adding the underlay SVI's L2 segment would turn
+            # that L1 port into an L2 port and drop the VRF address.
+            if (name, port) in c.linked_ports:
+                continue
+            self._port_items(name, port)
+
+    def copy_port(self, device: str, port: str, skip_subifs: Optional[Set[str]] = None) -> None:
         """Bring the underlay items of one port of an overlay device along.
 
         Used when an underlay link to that port is drawn: its IP / VRF / L2,
         the port-channel it is a member of (with the logical port's items),
-        and the sub-interfaces it parents.
+        and the sub-interfaces it parents. ``skip_subifs`` leaves out ports
+        the overlay already drew (a VRF sub-interface on the VRF-GW), so the
+        parent trunk can stay without copying those addresses onto the VTEP.
         """
         c = self.canvas
+        skipped = skip_subifs or set()
         self._port_items(device, port)
         pc = self.pc_of_member.get((device, port))
         if pc is not None:
             c.portchannel(device, port, pc.portchannel_name)
             self._port_items(device, pc.portchannel_name)
         for si in self.subifs_of_parent.get((device, port), []):
+            if si.subif_port in skipped:
+                continue
             if not any(s.device == si.device and s.subif_port == si.subif_port for s in c.model.subinterfaces):
                 c.model.subinterfaces.append(replace(si))
                 self._port_items(device, si.subif_port)

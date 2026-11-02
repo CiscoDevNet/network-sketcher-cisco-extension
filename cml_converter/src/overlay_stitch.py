@@ -18,16 +18,23 @@ every attachment the CML L1 link on that port (on each member port, for a
 * to nothing: an SD-WAN port goes to a gray per-Edge LAN dummy as in
   sdwan_converter; any other port is reported and left out.
 
+A sub-interface has no cable of its own. The link on its parent port is
+followed to the peer SVI of the same VLAN and VRF, and that parent trunk
+stays in the diagram as an underlay link. The sub-interface addresses stay
+on the VRF-GW, not on the VTEP.
+
 After that the devices the overlay did not draw are added as in the
 underlay (see ``overlay_underlay``): the rest of an overlay lab joins its
-areas, and a lab with no overlay keeps its underlay areas. A link between two
-different non-waypoint areas is never drawn (NS RULE 3); it is listed in the
-report instead.
+areas, and a lab with no overlay keeps its underlay areas. An EVPN VTEP is
+drawn only for links the overlay does not represent (a spine uplink, a DCI
+port). A link between two different non-waypoint areas is never drawn
+(NS RULE 3); it is listed in the report instead.
 """
 
 from __future__ import annotations
 
 import ipaddress
+import re
 from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
@@ -49,6 +56,42 @@ from .stencil_mapper import (
 from .topology_mapper import NSL1Link, NSModel, arrange_area_rows
 
 _TRANSPARENT_NODES = {"unmanaged_switch"}
+_SUBIF_PARENT = re.compile(r"^(.*)\.\d+$")
+
+
+def _subif_parent(port: str) -> Optional[str]:
+    """``Ethernet 1/1.110`` -> ``Ethernet 1/1``. The CML cable is on the parent."""
+    match = _SUBIF_PARENT.match(port)
+    return match.group(1) if match else None
+
+
+def _vlan_number(port: str, access_vlan: Optional[int]) -> Optional[int]:
+    if access_vlan is not None:
+        return access_vlan
+    match = re.search(r"(\d+)$", port)
+    return int(match.group(1)) if match else None
+
+
+def evpn_absorbed_ports(facts: OverlayFacts) -> Set[str]:
+    """Ports an EVPN VTEP must not carry, because the overlay already drew them.
+
+    An L2VNI access port is drawn on ``NET``. A routed VRF port (and a LAG's
+    members) is drawn on the VRF-GW. The parent of a VRF sub-interface is not
+    absorbed: that trunk is an underlay cable and stays on the VTEP. Anything
+    else, such as a spine uplink or a DCI port, stays too.
+    """
+    ev = facts.evpn
+    if ev is None:
+        return set()
+    absorbed: Set[str] = set()
+    for port, ctx in facts.ports.items():
+        if (ctx.kind in ("physical", "portchannel") and ctx.access_vlan is not None
+                and ctx.access_vlan in ev.l2vni):
+            absorbed.add(port)
+        if ctx.vrf and ctx.kind in ("physical", "subif", "portchannel") and ctx.cidrs:
+            absorbed.add(port)
+            absorbed.update(facts.members.get(port, []))
+    return absorbed
 
 
 @dataclass
@@ -145,7 +188,22 @@ class _Stitcher:
             self.lab_of.get(device, "lab"), row, st,
             attribute=attr, is_endpoint=st.stencil_type not in (NS_ROUTER, NS_L3SWITCH, NS_SWITCH, NS_FIREWALL),
         )
+        self.canvas.placed_by_stitch.add(device)
         return True
+
+    def _svi_port(self, device: str, vlan: Optional[int], vrf: Optional[str]) -> Optional[str]:
+        """The peer's SVI of ``vlan`` in ``vrf``, if it has one."""
+        if vlan is None or not vrf:
+            return None
+        facts = self.facts.get(device)
+        if facts is None:
+            return None
+        for port, ctx in facts.ports.items():
+            if ctx.kind != "svi" or ctx.vrf != vrf:
+                continue
+            if _vlan_number(port, ctx.access_vlan) == vlan:
+                return port
+        return None
 
     def _peer_row(self, device: str) -> int:
         st = self.stencils.get(device)
@@ -258,6 +316,20 @@ class _Stitcher:
             self.canvas.vrf(name, dport, a.vrf)
             self.canvas.counts["lan_dummy_ports"] += 1
 
+    def _cable_ports(self, a: Attachment) -> List[str]:
+        """Ports whose CML link belongs to ``a``.
+
+        A sub-interface is not cabled. Its parent is, and that is what the
+        peer (and the peer's SVI) is found from.
+        """
+        direct = [p for p in a.cml_ports() if self.peers.get((a.device, p))]
+        if direct:
+            return direct
+        parent = _subif_parent(a.port)
+        if parent and not a.members and self.peers.get((a.device, parent)):
+            return [parent]
+        return []
+
     # ----- all -----
     def run(self) -> None:
         for a in self.attachments:
@@ -265,7 +337,7 @@ class _Stitcher:
             if key in self.done:
                 continue
             self.done.add(key)
-            cml_ports = [p for p in a.cml_ports() if self.peers.get((a.device, p))]
+            cml_ports = self._cable_ports(a)
             if not cml_ports:
                 if a.lan_dummy:
                     self._to_lan_dummy(a, a.link_end(self.canvas, a.cml_ports()[0]))
@@ -279,12 +351,29 @@ class _Stitcher:
                     f"to {a.draw_device}; the other members are not drawn.")
                 cml_ports = cml_ports[:1]
             for cml_port in cml_ports:
+                via_parent = cml_port != a.port and cml_port not in a.members
                 a_end = a.link_end(self.canvas, cml_port)
                 for q, qp in self.peers[(a.device, cml_port)]:
-                    if (q, qp) not in self.index and self._transparent(q):
+                    target = qp
+                    if via_parent:
+                        svi = self._svi_port(q, a.vlan, a.vrf)
+                        if svi:
+                            target = svi
+                        elif not self.canvas.port_free(q, qp):
+                            self.canvas.note(
+                                f"{a.device} {a.port} ({a.context}) shares {q} {qp} "
+                                "with another attachment and is not drawn.")
+                            continue
+                    if (target != qp and not self.canvas.port_free(q, target)
+                            and (q, target) not in self.index):
+                        self.canvas.note(
+                            f"{a.device} {a.port} ({a.context}) shares {q} {target} "
+                            "with another attachment and is not drawn.")
+                        continue
+                    if (q, target) not in self.index and target == qp and self._transparent(q):
                         self._through_switch(a, a_end, q, qp)
                     else:
-                        self._connect(a, a_end, q, qp)
+                        self._connect(a, a_end, q, target)
 
 
 # ---------------------------------------------------------------------------
@@ -396,11 +485,14 @@ def _add_underlay(
     """Draw everything the overlay did not, as in the underlay.
 
     In an overlay lab, a device the overlay left out joins its overlay area
-    (an External Connector keeps its underlay waypoint area); an EVPN VTEP is
-    not drawn because its VRF-GW stands for it. A lab with no overlay is
-    copied with its underlay areas and grid. Then every underlay link whose
-    two ends are drawn is added, unless a port is taken or it would cross
-    areas. Returns ``{underlay area: lab}`` for the layout.
+    (an External Connector keeps its underlay waypoint area). An EVPN VTEP is
+    drawn only for links the overlay does not represent; its L2VNI access
+    ports and VRF ports stay on the NET and the VRF-GW. A device the stitch
+    already placed keeps the underlay ports the overlay did not write. A lab
+    with no overlay is copied with its underlay areas and grid. Then every
+    underlay link whose two ends are drawn is added, unless a port is taken,
+    the VTEP port is one the overlay represents, or it would cross areas.
+    Returns ``{underlay area: lab}`` for the layout.
     """
     copier = UnderlayCopier(canvas, underlay)
     grid_row: Dict[str, int] = {}
@@ -421,17 +513,39 @@ def _add_underlay(
             overlay_row_of[key] = min(overlay_row_of.get(key, d.row), d.row)
 
     vteps: Set[str] = set()
+    absorbed: Dict[str, Set[str]] = {
+        label: evpn_absorbed_ports(facts[label])
+        for label in labels if label in facts and facts[label].evpn is not None
+    }
     plain_areas: Dict[str, str] = {}
     mixed_areas: Set[str] = set()
     for label in labels:
-        if canvas.has(label) or label not in underlay.devices:
+        if label not in underlay.devices:
+            continue
+        if canvas.has(label):
+            if label in canvas.placed_by_stitch and label not in canvas.underlay_devices:
+                copier.fill_remaining(label)
             continue
         lab = lab_of.get(label, "lab")
         ud = underlay.devices[label]
         if lab in overlay_labs:
             f = facts.get(label)
             if f is not None and f.evpn is not None:
-                vteps.add(label)
+                leftover = [
+                    port for lk in underlay.l1_links
+                    for dev, port in ((lk.a_device, lk.a_port), (lk.b_device, lk.b_port))
+                    if dev == label and port not in absorbed.get(label, set())
+                ]
+                if not leftover:
+                    vteps.add(label)
+                    continue
+                r = grid_row.get(label, 0)
+                row = overlay_row_of.get((ud.area, r), ROW_UNDERLAY + r)
+                area = areas.get(label, lab)
+                canvas.add_underlay_device(ud, area, lab, row)
+                for port in sorted(set(leftover)):
+                    copier.copy_port(label, port, skip_subifs=absorbed.get(label, set()))
+                mixed_areas.add(area)
                 continue
             if ud.area.endswith("_wp_") or model_is_external_connector(ud.stencil.model):
                 copier.copy_device(label, ud.area, lab, grid_row.get(label, 0))
@@ -460,6 +574,8 @@ def _add_underlay(
                 vtep = b[0] if b[0] in vteps else a[0]
                 canvas.note(f"Not drawn (underlay): {other} -- {vtep}; the EVPN VTEP {vtep} "
                             "is shown as its VRF-GW.")
+            continue
+        if a[1] in absorbed.get(a[0], ()) or b[1] in absorbed.get(b[0], ()):
             continue
         if not canvas.port_free(*a) or not canvas.port_free(*b):
             continue
@@ -612,8 +728,8 @@ def write_overlay_report(path: Any, result: OverlayResult, not_extracted: List[s
         if result.canvas.lab_of_area.get(result.model.devices[name].area) in overlay_labs
     )
     if in_overlay_labs:
-        lines.append("Devices of an overlay lab that take no part in the overlay, drawn with their "
-                     "underlay ports, addresses and links:")
+        lines.append("Devices drawn from the underlay. An EVPN VTEP is included only for the "
+                     "links the overlay does not represent:")
         lines.append("")
         lines.extend(f"- {name} [{result.model.devices[name].area}]" for name in in_overlay_labs)
     if not result.underlay_labs and not in_overlay_labs:

@@ -471,12 +471,16 @@ class EvpnTests(unittest.TestCase):
         gw, net = "VRF-GW:evpn-lab-BLUE", "NET:evpn-lab-WEB"
         self.assertIn(gw, devices)
         self.assertIn(net, devices)
+        # The VRF-GW stands for the VTEP's overlay ports. The spine uplink is
+        # underlay, so the leaf is drawn for that link only.
         for leaf in ("leaf1", "leaf2"):
-            self.assertNotIn(leaf, devices)     # the VRF-GW stands for the VTEPs
-        # The spine takes no part in the overlay: drawn as in the underlay, unlinked.
+            self.assertIn(leaf, devices)
         self.assertIn("spine1", devices)
-        self.assertIsNone(_linked(m, "spine1", "leaf1"))
-        self.assertIn("the EVPN VTEP leaf1 is shown as its VRF-GW", run.report)
+        self.assertIsNotNone(_linked(m, "spine1", "leaf1"))
+        self.assertIsNone(_linked(m, "leaf1", "host1"))
+        self.assertNotIn("the EVPN VTEP leaf1 is shown as its VRF-GW", run.report)
+        self.assertEqual(_ips(m)[("leaf1", "Ethernet 1/1")], ["10.0.0.1/31"])
+        self.assertNotIn(("leaf1", "Vlan 10"), _ips(m))
         self.assertEqual(devices[gw]["area"], "evpn-lab")
         self.assertEqual(_ips(m)[(gw, "Vlan 10")], ["10.10.10.1/24"])
         self.assertEqual(_vrfs(m)[(gw, "Vlan 10")], "BLUE")
@@ -502,6 +506,144 @@ class EvpnTests(unittest.TestCase):
         self.assertIsNotNone(_linked(m, "h1", net))
         self.assertIn("L3VNI 50901", run.script)
         self.assertIn("L2VNI 10101", run.script)
+        self.assertNotIn("xe-leaf1", m["devices"])
+
+
+BGW_L3 = """hostname BGW1
+feature nv overlay
+feature vn-segment-vlan-based
+nv overlay evpn
+vlan 500
+  name L3VNI-VRF-A
+  vn-segment 50000
+vlan 501
+  name L3VNI-VRF-B
+  vn-segment 50001
+vrf context VRF-A
+  vni 50000
+vrf context VRF-B
+  vni 50001
+interface Vlan500
+  vrf member VRF-A
+interface Vlan501
+  vrf member VRF-B
+interface nve1
+  member vni 50000 associate-vrf
+  member vni 50001 associate-vrf
+interface Ethernet1/1
+  no switchport
+interface Ethernet1/1.110
+  encapsulation dot1q 110
+  vrf member VRF-A
+  ip address 10.1.0.2/30
+interface Ethernet1/1.120
+  encapsulation dot1q 120
+  vrf member VRF-B
+  ip address 10.1.0.6/30
+interface Ethernet1/2
+  no switchport
+  ip address 172.16.100.1/24
+"""
+
+SP_L3 = """hostname SP1
+ip routing
+vrf definition VRF-A
+ address-family ipv4
+vrf definition VRF-B
+ address-family ipv4
+vlan 10
+vlan 20
+vlan 110
+vlan 120
+interface Ethernet0/0
+ switchport trunk encapsulation dot1q
+ switchport trunk allowed vlan 110,120
+ switchport mode trunk
+interface Ethernet0/1
+ switchport mode access
+ switchport access vlan 10
+interface Ethernet0/2
+ switchport mode access
+ switchport access vlan 20
+interface Vlan10
+ vrf forwarding VRF-A
+ ip address 10.1.10.1 255.255.255.0
+interface Vlan20
+ vrf forwarding VRF-B
+ ip address 10.1.20.1 255.255.255.0
+interface Vlan110
+ vrf forwarding VRF-A
+ ip address 10.1.0.1 255.255.255.252
+interface Vlan120
+ vrf forwarding VRF-B
+ ip address 10.1.0.5 255.255.255.252
+"""
+
+SW_DCI = """hostname SW
+vlan 100
+interface Ethernet0/0
+ switchport mode access
+ switchport access vlan 100
+interface Vlan100
+ ip address 172.16.100.254 255.255.255.0
+"""
+
+
+class BgwTests(unittest.TestCase):
+    """An L3VNI border gateway keeps its DCI link and hands VRF sub-interfaces to the VRF-GW."""
+
+    def test_dci_stays_and_vrf_gateway_reaches_the_svi(self):
+        run = _overlay("bgw", [
+            ("BGW1", "nxosv9000", ["Ethernet1/1", "Ethernet1/2"], BGW_L3),
+            ("SP1", "ioll2-xe", ["Ethernet0/0", "Ethernet0/1", "Ethernet0/2"], SP_L3),
+            ("SW", "iosvl2", ["Ethernet0/0"], SW_DCI),
+            ("Host1-A", "alpine", ["eth0"], HOST.format(ip="10.1.10.10/24")),
+        ], [
+            ("SW", "Ethernet0/0", "BGW1", "Ethernet1/2"),
+            ("BGW1", "Ethernet1/1", "SP1", "Ethernet0/0"),
+            ("SP1", "Ethernet0/1", "Host1-A", "eth0"),
+        ])
+        m = run.model
+        devices = m["devices"]
+        gwa, gwb = "VRF-GW:bgw-VRF-A", "VRF-GW:bgw-VRF-B"
+        self.assertIn(gwa, devices)
+        self.assertIn(gwb, devices)
+        self.assertIn("BGW1", devices)
+        self.assertIsNotNone(_linked(m, "SW", "BGW1"))
+        self.assertEqual(_ips(m)[("BGW1", "Ethernet 1/2")], ["172.16.100.1/24"])
+        trunk = _linked(m, "BGW1", "SP1")
+        self.assertIsNotNone(trunk)
+        self.assertEqual({trunk[1], trunk[3]}, {"Ethernet 1/1", "Ethernet 0/0"})
+        bgw_ips = [c for (dev, _port), cs in _ips(m).items() if dev == "BGW1" for c in cs]
+        self.assertNotIn("10.1.0.2/30", bgw_ips)
+        self.assertNotIn("10.1.0.6/30", bgw_ips)
+
+        lk = _linked(m, gwa, "SP1")
+        self.assertIsNotNone(lk)
+        gw_port, sp_port = (lk[1], lk[3]) if lk[0] == gwa else (lk[3], lk[1])
+        self.assertEqual(sp_port, "Vlan 110")
+        self.assertEqual(_ips(m)[(gwa, gw_port)], ["10.1.0.2/30"])
+        self.assertEqual(_vrfs(m)[(gwa, gw_port)], "VRF-A")
+        self.assertEqual(_ips(m)[("SP1", "Vlan 110")], ["10.1.0.1/30"])
+        self.assertEqual(_vrfs(m)[("SP1", "Vlan 110")], "VRF-A")
+        self.assertFalse(any(
+            s["device"] == "SP1" and s["port"] == "Vlan 110"
+            for s in m["l2_segments_svi"] + m["l2_segments_phys"]
+        ))
+
+        lk = _linked(m, gwb, "SP1")
+        self.assertIsNotNone(lk)
+        sp_port = lk[3] if lk[2] == "SP1" else lk[1]
+        gw_port = lk[1] if lk[0] == gwb else lk[3]
+        self.assertEqual(sp_port, "Vlan 120")
+        self.assertEqual(_ips(m)[(gwb, gw_port)], ["10.1.0.6/30"])
+        self.assertEqual(_vrfs(m)[(gwb, gw_port)], "VRF-B")
+        self.assertEqual(_ips(m)[("SP1", "Vlan 120")], ["10.1.0.5/30"])
+
+        self.assertIsNotNone(_linked(m, "SP1", "Host1-A"))
+        self.assertEqual(_ips(m)[("SP1", "Vlan 10")], ["10.1.10.1/24"])
+        self.assertNotIn(("BGW1", "Ethernet 1/1.110"), _ips(m))
+        self.assertNotIn("has no CML link", run.report)
 
 
 class SdwanTests(unittest.TestCase):

@@ -68,6 +68,9 @@ class Attachment:
     ``members`` lists the physical ports of a ``Bundle-Ether`` /
     ``Port-channel`` attachment: the CML cable is on a member, while the IP
     and VRF stay on the logical port, as in the underlay.
+
+    ``vlan`` is the dot1q tag of a sub-interface. The cable is on the parent
+    port; the stitch step follows it to the peer SVI of this VLAN.
     """
     device: str
     port: str
@@ -79,6 +82,7 @@ class Attachment:
     draw_port: Optional[str] = None
     lan_dummy: bool = False  # SD-WAN: an unlinked LAN port goes to a LAN dummy
     members: List[str] = field(default_factory=list)
+    vlan: Optional[int] = None
 
     def cml_ports(self) -> List[str]:
         """The ports whose CML links belong to this attachment."""
@@ -120,6 +124,7 @@ class OverlayCanvas:
     notes: List[str] = field(default_factory=list)
     counts: Dict[str, int] = field(default_factory=lambda: defaultdict(int))
     underlay_devices: Set[str] = field(default_factory=set)   # drawn as in the underlay
+    placed_by_stitch: Set[str] = field(default_factory=set)  # real devices the stitch added
     fixed_grids: Dict[str, List[List[str]]] = field(default_factory=dict)  # area -> underlay grid
     _names: Set[str] = field(default_factory=set)
     _ip_ports: Set[Tuple[str, str]] = field(default_factory=set)

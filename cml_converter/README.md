@@ -133,8 +133,13 @@ an overlay; the rest stays as in the underlay:
   SD-WAN controllers and transport switches, External Connectors) are drawn
   with their underlay ports, addresses and colours in the same areas, and
   every underlay link between two drawn devices is added, so the overlay
-  devices stay connected to the rest of the lab. An EVPN leaf is not drawn
-  (its VRF-GW stands for it), so its links to the spine are left out.
+  devices stay connected to the rest of the lab. An EVPN VTEP's L2VNI access
+  ports and VRF ports are represented by its `NET` and `VRF-GW`, so those
+  cables are not drawn again on the VTEP. A VRF sub-interface has no cable of
+  its own: the VRF-GW is connected to the peer's SVI of the same VLAN and VRF,
+  and the addresses stay there. The parent trunk stays as an underlay link, so
+  the VTEP still joins the DCI switch and the site switch. Any other link (a
+  spine uplink, a DCI port) keeps the VTEP in the diagram too.
 - A lab with no overlay is copied from the underlay: its areas, device grid,
   links, L2 / L3, port-channels and External Connector waypoint areas.
 - Labs are arranged as in the underlay; an overlay lab takes the place of its
@@ -294,6 +299,15 @@ cml_converter/
 ```
 
 ## Changelog
+
+### EVPN VTEP links
+
+- **An EVPN VTEP is drawn for the links the overlay does not represent.** It
+  used to be omitted entirely, so a neighbour that only connected to it (a
+  DCI switch, a spine) had no link. L2VNI access ports still go to `NET`. A
+  VRF sub-interface's addresses go to the `VRF-GW` and the peer SVI, and the
+  parent trunk stays, so the VTEP still connects the DCI switch to the site
+  switch.
 
 ### No overlay found
 
