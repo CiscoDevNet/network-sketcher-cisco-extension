@@ -29,6 +29,11 @@ areas, and a lab with no overlay keeps its underlay areas. An EVPN VTEP is
 drawn only for links the overlay does not represent (a spine uplink, a DCI
 port). A link between two different non-waypoint areas is never drawn
 (NS RULE 3); it is listed in the report instead.
+
+The overlay grid keeps every real device in its underlay cell, including
+the ``_AIR_`` between columns, so a host stays on the row under the switch
+it is cabled to. ``NET`` and ``VRF-GW`` are new rows inserted just above
+the hosts they serve.
 """
 
 from __future__ import annotations
@@ -391,11 +396,206 @@ def _site_key(area: str, lab: str) -> Tuple[int, int, str]:
     return (1, 0, area)
 
 
+_AIR = "_AIR_"
+
+
+def _median(values: List[int]) -> int:
+    ordered = sorted(values)
+    return ordered[(len(ordered) - 1) // 2]
+
+
+def _grid_index(grid: List[List[str]]) -> Dict[str, Tuple[int, int]]:
+    return {
+        name: (r, c)
+        for r, row in enumerate(grid)
+        for c, name in enumerate(row)
+        if name != _AIR
+    }
+
+
+def _pad_grid(grid: List[List[str]]) -> None:
+    width = max((len(row) for row in grid), default=0)
+    for row in grid:
+        if len(row) < width:
+            row.extend([_AIR] * (width - len(row)))
+
+
+def _place_in_row(row: List[str], name: str, col: int) -> None:
+    """Put ``name`` at ``col``, or the nearest free cell, widening the row if needed."""
+    if col < 0:
+        col = 0
+    if col >= len(row):
+        row.extend([_AIR] * (col + 1 - len(row)))
+    if row[col] == _AIR:
+        row[col] = name
+        return
+    for off in range(1, len(row) + 2):
+        for candidate in (col + off, col - off):
+            if candidate < 0:
+                continue
+            if candidate >= len(row):
+                row.extend([_AIR] * (candidate + 1 - len(row)))
+            if row[candidate] == _AIR:
+                row[candidate] = name
+                return
+
+
+def _insert_row(grid: List[List[str]], index: int, items: List[Tuple[str, Optional[int]]]) -> None:
+    """Insert one row of ``items`` (name, column) at ``index`` and re-pad the grid."""
+    width = max((len(row) for row in grid), default=1)
+    row = [_AIR] * width
+    for name, col in items:
+        _place_in_row(row, name, width // 2 if col is None else col)
+    grid.insert(min(max(index, 0), len(grid)), row)
+    _pad_grid(grid)
+
+
+def _subgrid(source: List[List[str]], kept: Set[str]) -> List[List[str]]:
+    """The bounding box of ``kept`` devices, with everyone else turned into ``_AIR_``.
+
+    Rows that hold none of them are dropped. Columns between the leftmost and
+    rightmost kept device stay, so the ``_AIR_`` that separates two groups
+    survives and a host remains in the column under its switch.
+    """
+    cells = [
+        (r, c, name)
+        for r, row in enumerate(source)
+        for c, name in enumerate(row)
+        if name in kept
+    ]
+    if not cells:
+        return []
+    r0, r1 = min(r for r, _, _ in cells), max(r for r, _, _ in cells)
+    c0, c1 = min(c for _, c, _ in cells), max(c for _, c, _ in cells)
+    grid: List[List[str]] = []
+    for r in range(r0, r1 + 1):
+        src = source[r] if r < len(source) else []
+        row = []
+        for c in range(c0, c1 + 1):
+            name = src[c] if c < len(src) else _AIR
+            row.append(name if name in kept else _AIR)
+        if any(cell != _AIR for cell in row):
+            grid.append(row)
+    return grid
+
+
+def _remember_rows(canvas: OverlayCanvas, grid: List[List[str]]) -> None:
+    for name, (row, _) in _grid_index(grid).items():
+        device = canvas.model.devices.get(name)
+        if device is not None:
+            device.row = row
+
+
+def _overlay_area_grid(
+    canvas: OverlayCanvas,
+    area: str,
+    underlay_grids: Dict[str, List[List[str]]],
+    underlay_rows: List[List[str]],
+) -> List[List[str]]:
+    """Real devices stay in their underlay cells; logical devices are inserted.
+
+    Returns an empty grid when this area has no underlay device, so the caller
+    can keep the role rows (a WAN waypoint of VPN / VRF clouds).
+    """
+    here = [name for name, device in canvas.model.devices.items() if device.area == area]
+    if not here:
+        return []
+    kept = set(here)
+    rank: Dict[str, Tuple[int, int]] = {}
+    for ri, row in enumerate(underlay_rows):
+        for ci, src in enumerate(row):
+            rank.setdefault(src, (ri, ci))
+    pieces: List[List[List[str]]] = []
+    for src_area, source in sorted(underlay_grids.items(), key=lambda kv: rank.get(kv[0], (1 << 30, 0))):
+        piece = _subgrid(source, kept)
+        if piece:
+            pieces.append(piece)
+    if not pieces:
+        return []
+    width = max(len(row) for piece in pieces for row in piece)
+    grid: List[List[str]] = []
+    for piece in pieces:
+        for row in piece:
+            grid.append(list(row) + [_AIR] * (width - len(row)))
+
+    placed = set(_grid_index(grid))
+    logical = [name for name in here if name not in placed]
+    nets = sorted(name for name in logical if canvas.device_kind(name) == "network")
+    gateways = sorted(name for name in logical if canvas.device_kind(name) == "gateway")
+    others = sorted(name for name in logical if name not in set(nets) and name not in set(gateways))
+
+    loc = _grid_index(grid)
+    host_rows: List[int] = []
+    net_items: List[Tuple[str, Optional[int]]] = []
+    for net in nets:
+        hosts = [
+            peer for peer in canvas.linked_names(net)
+            if peer in loc and canvas.device_kind(peer) != "gateway"
+        ]
+        if hosts:
+            host_rows.append(min(loc[host][0] for host in hosts))
+            column: Optional[int] = _median([loc[host][1] for host in hosts])
+        else:
+            column = None
+        net_items.append((net, column))
+    if net_items:
+        _insert_row(grid, min(host_rows) if host_rows else 0, net_items)
+
+    loc = _grid_index(grid)
+    net_rows: List[int] = []
+    anchor_rows: List[int] = []
+    gw_items: List[Tuple[str, Optional[int]]] = []
+    for gw in gateways:
+        above_nets = [
+            peer for peer in canvas.linked_names(gw)
+            if peer in loc and canvas.device_kind(peer) == "network"
+        ]
+        anchors = above_nets or [peer for peer in canvas.linked_names(gw) if peer in loc]
+        if anchors:
+            anchor_rows.append(min(loc[peer][0] for peer in anchors))
+            if above_nets:
+                net_rows.append(min(loc[peer][0] for peer in above_nets))
+            column = _median([loc[peer][1] for peer in anchors])
+        else:
+            column = None
+        gw_items.append((gw, column))
+    if gw_items:
+        if net_rows:
+            at = min(net_rows)
+        elif anchor_rows:
+            at = min(anchor_rows)
+        else:
+            at = 0
+        _insert_row(grid, at, gw_items)
+
+    loc = _grid_index(grid)
+    below: Dict[int, List[Tuple[str, Optional[int]]]] = defaultdict(list)
+    loose: List[str] = []
+    for name in others:
+        anchors = [peer for peer in canvas.linked_names(name) if peer in loc]
+        if not anchors:
+            loose.append(name)
+            continue
+        below[max(loc[peer][0] for peer in anchors) + 1].append(
+            (name, _median([loc[peer][1] for peer in anchors])))
+    for at in sorted(below, reverse=True):
+        _insert_row(grid, at, below[at])
+    if loose:
+        _insert_row(grid, len(grid), [(name, index) for index, name in enumerate(loose)])
+
+    missing = [name for name in here if name not in _grid_index(grid)]
+    if missing:
+        _insert_row(grid, len(grid), [(name, index) for index, name in enumerate(sorted(missing))])
+    _remember_rows(canvas, grid)
+    return grid
+
+
 def layout(
     canvas: OverlayCanvas,
     lab_order: List[str],
     underlay_rows: Optional[List[List[str]]] = None,
     underlay_area_lab: Optional[Dict[str, str]] = None,
+    underlay_grids: Optional[Dict[str, List[List[str]]]] = None,
 ) -> None:
     """Arrange the areas the way the underlay arranged its labs.
 
@@ -404,9 +604,15 @@ def layout(
     area, its waypoint areas) take the place of that lab's first underlay
     area, and its WAN waypoint area goes on a row above. A lab the underlay
     rows do not mention follows at the end, one lab per row.
+
+    Inside an overlay area the device grid is the underlay grid of the devices
+    that are still drawn (``_AIR_`` included). ``NET`` and ``VRF-GW`` are
+    inserted above the hosts they serve. An area with no underlay device, such
+    as a WAN waypoint of clouds, keeps the role rows the builder recorded.
     """
     underlay_rows = underlay_rows or []
     underlay_area_lab = underlay_area_lab or {}
+    underlay_grids = underlay_grids or {}
     by_lab: Dict[str, List[str]] = defaultdict(list)
     for area, lab in canvas.lab_of_area.items():
         if area in canvas.fixed_grids or any(canvas.rows[area].values()):
@@ -461,7 +667,9 @@ def layout(
             if area in canvas.fixed_grids:
                 grid = [list(r) for r in canvas.fixed_grids[area]]
             else:
-                grid = [names for _, names in sorted(canvas.rows[area].items()) if names]
+                grid = _overlay_area_grid(canvas, area, underlay_grids, underlay_rows)
+                if not grid:
+                    grid = [names for _, names in sorted(canvas.rows[area].items()) if names]
             if grid:
                 canvas.model.area_to_devices[area] = grid
 
@@ -654,7 +862,7 @@ def build_overlay_model(
     pruned = canvas.prune_missing_ports()
     if pruned:
         canvas.note(f"{pruned} IP / VRF / L2 item(s) dropped because their port was not drawn.")
-    layout(canvas, lab_order, underlay.areas, area_lab)
+    layout(canvas, lab_order, underlay.areas, area_lab, underlay.area_to_devices)
     plain_labs = {canvas.lab_of_area[a] for a in canvas.fixed_grids if a in canvas.lab_of_area}
     result = OverlayResult(canvas.model, canvas, facts, found, drawn, areas)
     result.overlay_labs = [l for l in lab_order if l in overlay_labs]

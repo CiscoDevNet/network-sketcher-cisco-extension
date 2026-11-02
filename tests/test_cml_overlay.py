@@ -303,13 +303,15 @@ NodeSpec = Tuple[str, str, List[str], str]       # label, node_definition, iface
 LinkSpec = Tuple[str, str, str, str]             # a, a_iface, b, b_iface
 
 
-def _lab_yaml(title: str, nodes: List[NodeSpec], links: List[LinkSpec]) -> Dict:
+def _lab_yaml(title: str, nodes: List[NodeSpec], links: List[LinkSpec],
+              positions: Optional[Dict[str, Tuple[float, float]]] = None) -> Dict:
     """A CML UI-export style lab (node-local interface ids, n1/i1 links)."""
     out_nodes, index = [], {}
     for n, (label, nd, ifaces, cfg) in enumerate(nodes):
+        x, y = (positions or {}).get(label, (float(n * 100), 0.0))
         node = {
             "id": f"n{n}", "label": label, "node_definition": nd,
-            "x": n * 100, "y": 0, "tags": [],
+            "x": x, "y": y, "tags": [],
             "interfaces": [{"id": f"i{k}", "label": l, "type": "physical"}
                            for k, l in enumerate(ifaces)],
         }
@@ -433,8 +435,9 @@ def _convert(doc: Dict, *extra: str, as_json: bool = False) -> _Run:
     return _Run(rc, out, err.getvalue())
 
 
-def _overlay(title: str, nodes: List[NodeSpec], links: List[LinkSpec], *extra: str) -> _Run:
-    run = _convert(_lab_yaml(title, nodes, links), "--mode", "overlay", *extra)
+def _overlay(title: str, nodes: List[NodeSpec], links: List[LinkSpec], *extra: str,
+             positions: Optional[Dict[str, Tuple[float, float]]] = None) -> _Run:
+    run = _convert(_lab_yaml(title, nodes, links, positions), "--mode", "overlay", *extra)
     if run.rc != 0:
         raise AssertionError(f"convert failed rc={run.rc}: {run.stderr}")
     return run
@@ -457,6 +460,14 @@ def _ips(model: Dict) -> Dict[Tuple[str, str], List[str]]:
 
 def _vrfs(model: Dict) -> Dict[Tuple[str, str], str]:
     return {(x["device"], x["port"]): x["vrf"] for x in model["vrf_renames"]}
+
+
+def _cell(grid: List[List[str]], name: str) -> Tuple[int, int]:
+    for r, row in enumerate(grid):
+        for c, cell in enumerate(row):
+            if cell == name:
+                return r, c
+    raise AssertionError(f"{name} is not in the grid")
 
 
 # ---------------------------------------------------------------------------
@@ -934,6 +945,53 @@ class ErrorTests(unittest.TestCase):
                          (b.out_dir / "ns_commands.txt").read_text(encoding="utf-8"))
         self.assertNotIn("Unknown','Unknown','Unknown",
                          (a.out_dir / "ns_commands.txt").read_text(encoding="utf-8"))
+
+
+class GridColumnTests(unittest.TestCase):
+    """A host stays on the underlay row under its switch, with _AIR_ between groups."""
+
+    def test_hosts_stay_under_their_switch(self):
+        nodes = [
+            ("leaf1", "nxosv9000", ["Ethernet1/1", "Ethernet1/2"],
+             NXOS_LEAF.format(name="leaf1", fabric_ip="10.0.0.1/31", extra="")),
+            ("host1", "alpine", ["eth0"], HOST.format(ip="10.10.10.11/24")),
+            ("spL", "iosvl2", ["GigabitEthernet0/0"], "hostname spL\n"),
+            ("hL", "alpine", ["eth0"], HOST.format(ip="192.0.2.10/24")),
+            ("spR", "iosvl2", ["GigabitEthernet0/0"], "hostname spR\n"),
+            ("hR", "alpine", ["eth0"], HOST.format(ip="192.0.2.20/24")),
+        ]
+        links = [
+            ("leaf1", "Ethernet1/2", "host1", "eth0"),
+            ("spL", "GigabitEthernet0/0", "hL", "eth0"),
+            ("spR", "GigabitEthernet0/0", "hR", "eth0"),
+        ]
+        # Distinct canvas bands: the L2VNI host above, each site switch with its
+        # host one band below, and a wide gap between the two sites.
+        positions = {
+            "leaf1": (200.0, 0.0), "host1": (200.0, 100.0),
+            "spL": (0.0, 300.0), "hL": (0.0, 400.0),
+            "spR": (800.0, 300.0), "hR": (800.0, 400.0),
+        }
+        run = _overlay("cols", nodes, links, positions=positions)
+        grid = run.model["area_to_devices"]["cols"]
+        for switch, host in (("spL", "hL"), ("spR", "hR")):
+            sr, sc = _cell(grid, switch)
+            hr, hc = _cell(grid, host)
+            self.assertEqual(hr, sr + 1, switch)
+            self.assertEqual(hc, sc, switch)
+        left, right = _cell(grid, "hL")[1], _cell(grid, "hR")[1]
+        self.assertLess(left, right)
+        switch_row = grid[_cell(grid, "spL")[0]]
+        self.assertIn("_AIR_", switch_row[left + 1:right])
+        host_row, host_col = _cell(grid, "host1")
+        self.assertNotEqual(host_row, _cell(grid, "hL")[0])
+        net_row, net_col = _cell(grid, "NET:cols-WEB")
+        gw_row, gw_col = _cell(grid, "VRF-GW:cols-BLUE")
+        self.assertEqual(net_row, host_row - 1)
+        self.assertEqual(net_col, host_col)
+        self.assertEqual(gw_row, net_row - 1)
+        self.assertEqual(gw_col, net_col)
+        self.assertIn("_AIR_", run.script)
 
 
 if __name__ == "__main__":

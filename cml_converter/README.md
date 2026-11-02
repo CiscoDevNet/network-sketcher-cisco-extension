@@ -139,7 +139,10 @@ an overlay; the rest stays as in the underlay:
   its own: the VRF-GW is connected to the peer's SVI of the same VLAN and VRF,
   and the addresses stay there. The parent trunk stays as an underlay link, so
   the VTEP still joins the DCI switch and the site switch. Any other link (a
-  spine uplink, a DCI port) keeps the VTEP in the diagram too.
+  spine uplink, a DCI port) keeps the VTEP in the diagram too. Real devices
+  keep the underlay grid cell, including the `_AIR_` between columns, so a
+  host stays on the row under the switch it is cabled to. `VRF-GW` and `NET`
+  are inserted on the rows just above the hosts they serve.
 - A lab with no overlay is copied from the underlay: its areas, device grid,
   links, L2 / L3, port-channels and External Connector waypoint areas.
 - Labs are arranged as in the underlay; an overlay lab takes the place of its
@@ -299,6 +302,14 @@ cml_converter/
 ```
 
 ## Changelog
+
+### Overlay grid
+
+- **Real devices keep their underlay columns.** The overlay used to pack each
+  tier into a row and drop `_AIR_`, so Network Sketcher centred every row and
+  a host landed far from its switch. A host now stays on the row under the
+  switch it is cabled to. `VRF-GW` and `NET` are inserted on the rows just
+  above the hosts they serve.
 
 ### EVPN VTEP links
 

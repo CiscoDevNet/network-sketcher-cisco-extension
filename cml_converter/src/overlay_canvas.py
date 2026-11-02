@@ -153,6 +153,28 @@ class OverlayCanvas:
         d = self.model.devices.get(name)
         return d.area if d else None
 
+    def device_kind(self, name: str) -> str:
+        """Stencil tag of a drawn device (``network``, ``gateway``, and so on)."""
+        device = self.model.devices.get(name)
+        if device is None:
+            return ""
+        tags = device.stencil.tags or []
+        return str(tags[0]) if tags else str(device.stencil.node_definition or "")
+
+    def linked_names(self, name: str) -> List[str]:
+        """Devices joined to ``name`` by an L1 link, in link order.
+
+        The layout uses this to put a ``NET`` above its hosts and a ``VRF-GW``
+        above that ``NET``, without moving the underlay cells of either end.
+        """
+        found: List[str] = []
+        for lk in self.model.l1_links:
+            if lk.a_device == name:
+                found.append(lk.b_device)
+            elif lk.b_device == name:
+                found.append(lk.a_device)
+        return found
+
     def unique_name(self, base: str) -> str:
         """``base`` (or ``base_2`` …) not yet used, compared without case."""
         name, n = base, 2
